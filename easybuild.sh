@@ -305,10 +305,11 @@ parse_commandline() {
 			FEATURE_AUTOUPDATE=0
 		elif [ "$var" = "-RPI" ]; then
 			einfo "Will enable Raspberry PI build ..."
+			CMAKE_TOOLCHAIN_FILE=cmake/Toolchain-cross-rpi-linux.cmake
 			ARM=1
 			CROSS_COMPILE32=0
 			x86_build=false
-			FEATURE_RENDERER_GLES=0
+			FEATURE_RENDERER_GLES=1
 			RENDERER_DYNAMIC=0
 			FEATURE_RENDERER2=0
 			# FIXME: ogg doesn't compile
@@ -405,6 +406,7 @@ generate_configuration() {
 	MAKEFILE_GENERATOR=${MAKEFILE_GENERATOR:-Unix Makefiles}
 
 	#cmake variables
+	CMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
 	RELEASE_TYPE=${RELEASE_TYPE:-Release}
 	CROSS_COMPILE32=${CROSS_COMPILE32:-1}
 	ARM=${ARM:-0}
@@ -474,6 +476,7 @@ generate_configuration() {
 
 	einfo "Configuring ET: Legacy..."
 	_CFGSTRING="
+		-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
 		-DCMAKE_BUILD_TYPE=${RELEASE_TYPE}
 		-DCROSS_COMPILE32=${CROSS_COMPILE32}
 		-DZIP_ONLY=${ZIP_ONLY}
