@@ -22,6 +22,12 @@ if(EXISTS "/opt/vc/include/bcm_host.h")
 		find_library(GLES_LIBRARY NAMES libGLESv1_CM.so.1 PATHS "/usr/lib/arm-linux-gnueabihf/")
 		MESSAGE("Raspberry Pi 4 found")
 	endif()
+elseif(EXISTS "$ENV{RASPBIAN_ROOTFS}/opt/vc/include/bcm_host.h")
+
+	#Set Only RPI 2/3 GLES
+	find_path(GLES_INCLUDE_DIR NAMES GLES/gl.h PATHS "$ENV{RASPBIAN_ROOTFS}/opt/vc/include/")
+	find_library(GLES_LIBRARY NAMES brcmGLESv2 PATHS "$ENV{RASPBIAN_ROOTFS}/opt/vc/lib/")
+	MESSAGE("Raspberry Pi 2/3 found")
 else()
 	find_path(GLES_INCLUDE_DIR GLES/gl.h)
 	find_library(GLES_LIBRARY NAMES GLESv1_CM)
