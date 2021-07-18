@@ -4,43 +4,43 @@
 
 if("$ENV{RASPBIAN_ROOTFS}" STREQUAL "")
 	message(FATAL_ERROR "Define the RASPBIAN_ROOTFS environment variable to point to the raspbian rootfs.")
-else()
-	set(SYSROOT_PATH "$ENV{RASPBIAN_ROOTFS}")
 endif()
 
-# This one will be changing more often than anticipated
-set(TOOLCHAIN_HOST "armv7-rpi3-linux-gnueabihf")
+set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_VERSION 1)
+set(CMAKE_SYSTEM_PROCESSOR armv7l)
 
-message(STATUS "Using sysroot path: ${SYSROOT_PATH}")
+set(tools /opt/cross-pi-gcc) # warning change toolchain path here.
 
-set(TOOLCHAIN_CC "${TOOLCHAIN_HOST}-gcc")
-set(TOOLCHAIN_CXX "${TOOLCHAIN_HOST}-g++")
-set(TOOLCHAIN_LD "${TOOLCHAIN_HOST}-ld")
-set(TOOLCHAIN_AR "${TOOLCHAIN_HOST}-ar")
-set(TOOLCHAIN_RANLIB "${TOOLCHAIN_HOST}-ranlib")
-set(TOOLCHAIN_STRIP "${TOOLCHAIN_HOST}-strip")
-set(TOOLCHAIN_NM "${TOOLCHAIN_HOST}-nm")
+set(CMAKE_SYSROOT "$ENV{RASPBIAN_ROOTFS}")
+set(CMAKE_FIND_ROOT_PATH "${CMAKE_PREFIX_PATH};${CMAKE_SYSROOT}")
 
-set(CMAKE_CROSSCOMPILING TRUE)
-set(CMAKE_SYSROOT "${SYSROOT_PATH}")
+set(CMAKE_LIBRARY_ARCHITECTURE arm-linux-gnueabihf)
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fPIC -Wl,-rpath-link,${CMAKE_SYSROOT}/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} -L${CMAKE_SYSROOT}/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+set(CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wl,-rpath-link,${CMAKE_SYSROOT}/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} -L${CMAKE_SYSROOT}/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wl,-rpath-link,${CMAKE_SYSROOT}/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} -L${CMAKE_SYSROOT}/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
 
-# Define name of the target system
-set(CMAKE_SYSTEM_NAME "Linux")
-set(CMAKE_SYSTEM_PROCESSOR "armv7l")
+## Compiler Binary 
+SET(BIN_PREFIX ${tools}/bin/arm-linux-gnueabihf)
 
-# Define the compiler
-set(CMAKE_C_COMPILER_WORKS 1)
-set(CMAKE_CXX_COMPILER_WORKS 1)
-set(CMAKE_C_COMPILER ${TOOLCHAIN_CC})
-set(CMAKE_CXX_COMPILER ${TOOLCHAIN_CXX})
+SET (CMAKE_C_COMPILER ${BIN_PREFIX}-gcc)
+SET (CMAKE_CXX_COMPILER ${BIN_PREFIX}-g++ )
+SET (CMAKE_LINKER ${BIN_PREFIX}-ld 
+            CACHE STRING "Set the cross-compiler tool LD" FORCE)
+SET (CMAKE_AR ${BIN_PREFIX}-ar 
+            CACHE STRING "Set the cross-compiler tool AR" FORCE)
+SET (CMAKE_NM {BIN_PREFIX}-nm 
+            CACHE STRING "Set the cross-compiler tool NM" FORCE)
+SET (CMAKE_OBJCOPY ${BIN_PREFIX}-objcopy 
+            CACHE STRING "Set the cross-compiler tool OBJCOPY" FORCE)
+SET (CMAKE_OBJDUMP ${BIN_PREFIX}-objdump 
+            CACHE STRING "Set the cross-compiler tool OBJDUMP" FORCE)
+SET (CMAKE_RANLIB ${BIN_PREFIX}-ranlib 
+            CACHE STRING "Set the cross-compiler tool RANLIB" FORCE)
+SET (CMAKE_STRIP {BIN_PREFIX}-strip 
+            CACHE STRING "Set the cross-compiler tool RANLIB" FORCE)
 
-set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${SYSROOT_PATH}/usr/lib/arm-linux-gnueabihf")
-set(CMAKE_FIND_ROOT_PATH "${CMAKE_INSTALL_PREFIX};${CMAKE_PREFIX_PATH};${CMAKE_SYSROOT}")
-
-# search for programs in the build host directories
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-# for libraries and headers in the target directories
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-
