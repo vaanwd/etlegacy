@@ -1670,6 +1670,26 @@ static void CG_Constructible(centity_t *cent)
 		if (cent->currentState.powerups == STATE_UNDERCONSTRUCTION)
 		{
 			ent.customShader = cgs.media.genericConstructionShader;
+            
+            if (cent->currentState.teamNum == TEAM_AXIS)
+            {
+                //Vector4Set(ent.shaderRGBA, 255, 64, 64, 255);
+                // red landmines
+                ent.shaderRGBA[0] = 255;
+                ent.shaderRGBA[1] = 0;
+                ent.shaderRGBA[2] = 0;
+                ent.shaderRGBA[3] = 255;
+            }
+            else
+            {
+                //Vector4Set(ent.shaderRGBA, 64, 64, 255, 255);
+                
+                // blue landmines
+                ent.shaderRGBA[0] = 0;
+                ent.shaderRGBA[1] = 0;
+                ent.shaderRGBA[2] = 255;
+                ent.shaderRGBA[3] = 255;
+            }
 		}
 
 		ent.hModel = cgs.inlineDrawModel[s1->modelindex2];

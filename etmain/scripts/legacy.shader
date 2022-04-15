@@ -1268,6 +1268,21 @@ textures/sfx/shoutcast_landmine
 	}
 }
 
+textures/sfx/construction_custom
+{ 
+     cull none 
+     deformVertexes wave 1 sin -0.5 0 0 1
+     noPicmip 
+     surfaceparm trans 
+     { 
+          map textures/sfx/construction.tga
+          blendFunc GL_SRC_ALPHA GL_ONE 
+          rgbGen vertex
+          tcGen environment 
+          tcMod scroll 0.025 -0.07625 
+     } 
+}
+
 // HUD Ranks
 gfx/hud/ranks/rank2
 {
