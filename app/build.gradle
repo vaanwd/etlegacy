@@ -97,6 +97,8 @@ android {
     }
 }
 
+android.packagingOptions.pickFirst("libs/*/*.so")
+
 dependencies {
     api 'com.github.erz05:JoyStick:1.1.0'
     implementation 'com.loopj.android:android-async-http:1.4.11'
