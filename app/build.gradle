@@ -97,7 +97,7 @@ android {
     }
 }
 
-android.packagingOptions.pickFirst("libs/*/*.so")
+android.packagingOptions.pickFirst("/build/intermediates/cxx/Release/5zb431ri/obj/arm64-v8a/libSDL2.so")
 
 dependencies {
     api 'com.github.erz05:JoyStick:1.1.0'
