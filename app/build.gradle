@@ -81,10 +81,6 @@ android {
 
     }
 
-    packagingOptions {
-        pickFirst "/build/intermediates/cxx/Release/5zb431ri/obj/arm64-v8a/libSDL2.so"
-    }
-
     lintOptions {
         abortOnError false
     }
