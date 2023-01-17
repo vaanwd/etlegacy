@@ -311,11 +311,11 @@ parse_commandline() {
 			FEATURE_AUTOUPDATE=0
 		elif [ "$var" = "-RPI" ]; then
 			einfo "Will enable Raspberry PI build ..."
-			CMAKE_TOOLCHAIN_FILE=cmake/Toolchain-cross-rpi-linux.cmake
+			CMAKE_TOOLCHAIN_FILE=cmake/Toolchain-cross-aarch64-linux.cmake
 			ARM=1
 			CROSS_COMPILE32=0
 			x86_build=false
-			FEATURE_RENDERER_GLES=1
+			FEATURE_RENDERER_GLES=0
 			RENDERER_DYNAMIC=0
 			FEATURE_RENDERER2=0
 			# FIXME: ogg doesn't compile
