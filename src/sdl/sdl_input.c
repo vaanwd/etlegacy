@@ -1403,7 +1403,7 @@ void IN_Shutdown(void)
 	IN_DeactivateMouse();
 	mouseAvailable = qfalse;
 
-	IN_ShutdownJoystick();
+	IN_ShutdownGameController();
 
 	mainScreen = NULL;
 }
@@ -1413,6 +1413,6 @@ void IN_Shutdown(void)
  */
 void IN_Restart(void)
 {
-	IN_ShutdownJoystick();
+	IN_ShutdownGameController();
 	IN_Init();
 }
