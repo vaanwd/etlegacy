@@ -764,7 +764,7 @@ static void IN_InitGameController(void)
 
 	if (stick != NULL)
 	{
-		SDL_JoystickClose(stick);
+		SDL_GameControllerClose(stick);
 	}
 
 	stick = NULL;
@@ -798,7 +798,7 @@ static void IN_InitGameController(void)
 	}
 
 
-	stick = SDL_JoystickOpen(in_gamecontrollerNo->integer);
+	stick = SDL_GameControllerOpen(in_gamecontrollerNo->integer);
 
 	if (stick == NULL)
 	{
@@ -812,7 +812,7 @@ static void IN_InitGameController(void)
 /**
  * @brief IN_ShutdownJoystick
  */
-static void IN_ShutdownJoystick(void)
+static void IN_ShutdownGameController(void)
 {
 	Cmd_RemoveCommand("gamecontrollerInfo");
 
@@ -824,7 +824,7 @@ static void IN_ShutdownJoystick(void)
 
 	if (stick)
 	{
-		SDL_JoystickClose(stick);
+		SDL_GameControllerClose(stick);
 		stick = NULL;
 	}
 
@@ -846,6 +846,7 @@ static void IN_JoyMove(void)
 		return;
 	}
 
+	//SDL_GameControllerUpdate(); FIXME: use this one or bellow ?
 	SDL_JoystickUpdate();
 
 	// now query the stick buttons...
