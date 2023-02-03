@@ -49,13 +49,12 @@ menuDef {
 	BIND( 8, FIRETEAM_Y+124, (SUBWINDOW_WIDTH)-4, 10, _("Select Member #7:"), .2, 8, "selectbuddy 6", "" )
 	BIND( 8, FIRETEAM_Y+136, (SUBWINDOW_WIDTH)-4, 10, _("Select Member #8:"), .2, 8, "selectbuddy 7", "" )
 
-// Joystick //
+// GAMECONTROLLER //
 #define JOYSTICK_Y 244
-	SUBWINDOW( 6, JOYSTICK_Y, (SUBWINDOW_WIDTH), 64, _("JOYSTICK") )
-	MULTI( 8, JOYSTICK_Y+16, (SUBWINDOW_WIDTH)-4, 10, _("Enable Joysticks:"), .2, 8, "in_joystick", cvarFloatList { "No" 0 "Yes" 1 }, _("Toggle joystick initialization (requires vid_restart)") )
-	EDITFIELD( 8, JOYSTICK_Y+28, (SUBWINDOW_WIDTH)-4, 10, _("Use Joystick #:"), .2, 8, "in_joystickNo", 64, 18, _("Specify active joystick") )
-	MULTI( 8, JOYSTICK_Y+40, (SUBWINDOW_WIDTH)-4, 10, _("Analog Joystick:"), .2, 8, "in_joystickUseAnalog", cvarFloatList { "No" 0 "Yes" 1 }, _("Toggle analog joystick") )
-	EDITFIELD( 8, JOYSTICK_Y+52, (SUBWINDOW_WIDTH)-4, 10, _("Joystick Threshold:"), .2, 8, "in_joystickThreshold", 64, 18, _("Set joystick threshold sensitivity") )
+	SUBWINDOW( 6, JOYSTICK_Y, (SUBWINDOW_WIDTH), 52, _("GAMECONTROLLER") )
+	MULTI( 8, JOYSTICK_Y+16, (SUBWINDOW_WIDTH)-4, 10, _("Enable GameController:"), .2, 8, "in_gamecontroller", cvarFloatList { "No" 0 "Yes" 1 }, _("Toggle gamecontroller initialization (requires vid_restart)") )
+	EDITFIELD( 8, JOYSTICK_Y+28, (SUBWINDOW_WIDTH)-4, 10, _("Use GameController #:"), .2, 8, "in_gamecontrollerNo", 64, 18, _("Specify active gamecontroller") )
+	EDITFIELD( 8, JOYSTICK_Y+40, (SUBWINDOW_WIDTH)-4, 10, _("GameController Threshold:"), .2, 8, "in_gamecontrollerThreshold", 64, 18, _("Set gamecontroller threshold sensitivity") )
 
 #define MISC_Y 32
 	SUBWINDOW( 6+(SUBWINDOW_WIDTH)+6, MISC_Y, (SUBWINDOW_WIDTH), 88, _("MISC") )
