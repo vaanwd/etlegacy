@@ -52,12 +52,12 @@ static qboolean mouseActive    = qfalse;
 static SDL_GameController *gamecontroller;
 static SDL_GameController **gamecontrollers;
 static int num_controllers = 0;
-static SDL_Joystick *stick                      = NULL;
+static SDL_Joystick *stick                            = NULL;
 static SDL_GameControllerAxis virtual_axis_active = SDL_CONTROLLER_AXIS_INVALID;
 static int virtual_axis_start_x;
 static int virtual_axis_start_y;
 static SDL_GameControllerButton virtual_button_active = SDL_CONTROLLER_BUTTON_INVALID;
-static cvar_t       *in_gamecontroller          = NULL;
+static cvar_t       *in_gamecontroller                = NULL;
 static cvar_t       *in_gamecontrollerThreshold       = NULL;
 static cvar_t       *in_gamecontrollerNo              = NULL;
 
@@ -737,6 +737,7 @@ void IN_PrintGameController_f(void)
 	if (SDL_NumJoysticks() > 0)
 	{
 		Com_Printf("GameController [%d] '%s' opened - %i devices available\n", in_gamecontrollerNo->integer, SDL_GameControllerName(gamecontroller), SDL_NumJoysticks());
+		Com_Printf("GameController Serial '%s'", SDL_GameControllerGetSerial(gamecontroller));
 		Com_Printf("Buttons:    %d\n", SDL_JoystickNumButtons(stick));
 		Com_Printf("Axes:       %d\n", SDL_JoystickNumAxes(stick));
 	}
@@ -764,7 +765,8 @@ static void IN_InitGameController(void)
 
 	if (stick != NULL)
 	{
-		SDL_GameControllerClose(stick);
+		SDL_GameControllerClose(gamecontroller);
+		SDL_JoystickClose(stick);
 	}
 
 	stick = NULL;
@@ -779,7 +781,6 @@ static void IN_InitGameController(void)
 		}
 	}
 
-	// is there equivalent for gamecontroller ?
 	total = SDL_NumJoysticks();
 
 	// create list and build cvar to allow ui to select joystick
@@ -798,14 +799,16 @@ static void IN_InitGameController(void)
 	}
 
 
-	stick = SDL_GameControllerOpen(in_gamecontrollerNo->integer);
+	gamecontroller = SDL_GameControllerOpen(in_gamecontrollerNo->integer);
+	stick = SDL_JoystickOpen(in_gamecontrollerNo->integer);
 
 	if (stick == NULL)
 	{
-		Com_Printf(S_COLOR_RED "Joystick initialization failed: no device available.\n");
+		Com_Printf(S_COLOR_RED "GameController initialization failed: no device available.\n");
 		return;
 	}
 
+	SDL_GameControllerEventState(SDL_QUERY);
 	SDL_JoystickEventState(SDL_QUERY);
 }
 
@@ -824,7 +827,8 @@ static void IN_ShutdownGameController(void)
 
 	if (stick)
 	{
-		SDL_GameControllerClose(stick);
+		SDL_JoystickClose(stick);
+		SDL_GameControllerClose(gamecontroller);
 		stick = NULL;
 	}
 
