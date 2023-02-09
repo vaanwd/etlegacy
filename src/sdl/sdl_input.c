@@ -781,7 +781,47 @@ static void IN_InitGameController(void)
 		}
 	}
 
-	total = SDL_NumJoysticks();
+	for (total; total <= SDL_NumJoysticks(); total++)
+	{
+		switch (SDL_GameControllerTypeForIndex(total)) {
+            case SDL_CONTROLLER_TYPE_AMAZON_LUNA:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_GOOGLE_STADIA:
+				// Altest there is good reason to have Google Stadia GameController
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+            case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+            case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_PS3:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_PS4:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_PS5:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_XBOX360:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_XBOXONE:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            case SDL_CONTROLLER_TYPE_VIRTUAL:
+				SDL_GameControllerAddMappingsFromFile();
+                break;
+            default:
+				//SDL_GameControllerAddMappingsFromFile();
+                break;
+            }
+	}
 
 	// create list and build cvar to allow ui to select joystick
 	// FIXME: cvar availableJoysticks isn't used in our menus - add it?
