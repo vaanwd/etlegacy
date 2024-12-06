@@ -236,6 +236,93 @@ jobs:
             build/legacy/tvgame*.dll
           if-no-files-found: error
 
+  android-mod:
+    runs-on: ubuntu-20.04
+    needs: version
+    env:
+      SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGN_APK_ALLIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGN_APK_PASS }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGN_APK_PASS }}
+      CI_ETL_DESCRIBE: ${{needs.version.outputs.describe}}
+      CI_ETL_TAG: ${{needs.version.outputs.tag}}
+    container:
+      image: etlegacy/android-build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build JoyStick Dependency
+        working-directory: ./app/libs/joystick
+        run: |
+          ./gradlew clean               --stacktrace --info
+          ./gradlew assembleRelease     --stacktrace --info
+          ./gradlew publishToMavenLocal --stacktrace --info
+
+      - name: Upload JoyStick Dependency Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-joystick-packages
+          path: '/root/.m2/repository/com/etlegacy/android/joystick/'
+          if-no-files-found: error
+
+      - name: Build Release
+        if: github.repository == 'etlegacy/etlegacy'
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./gradlew clean assembleRelease --stacktrace --info
+          ls -R
+      - name: Build Debug
+        if: github.repository != 'etlegacy/etlegacy'
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./gradlew clean assembleDebug --stacktrace --info
+          ls -R
+
+      - name: Prepare artifacts
+        run: |
+          mv ./app/build/intermediates/merged_native_libs/*/mergeReleaseNativeLibs/out/lib/arm64-v8a/libcgame*.so .
+          mv ./app/build/intermediates/merged_native_libs/*/mergeReleaseNativeLibs/out/lib/arm64-v8a/libui*.so .
+          mv ./app/build/intermediates/merged_native_libs/*/mergeReleaseNativeLibs/out/lib/x86/libcgame*.so .
+          mv ./app/build/intermediates/merged_native_libs/*/mergeReleaseNativeLibs/out/lib/x86/libui*.so .
+          mv ./app/build/intermediates/merged_native_libs/*/mergeReleaseNativeLibs/out/lib/x86_64/libcgame*.so .
+          mv ./app/build/intermediates/merged_native_libs/*/mergeReleaseNativeLibs/out/lib/x86_64/libui*.so .
+          ls -ltrah
+
+      - name: Upload arm64-v8a
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64-mod
+          path: |
+            libcgame*arm64*.so
+            libui*arm64*.so
+          if-no-files-found: error
+
+      - name: Upload x86
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-x86-mod
+          path: |
+            libcgame*i386.so
+            libui*i386.so
+          if-no-files-found: error
+
+      - name: Upload x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-x86_64-mod
+          path: |
+            libcgame*x86_64.so
+            libui*x86_64.so
+          if-no-files-found: error
+
 #   __  __                                                          _
 #  |  \/  |                                                        | |
 #  | \  / |   ___   _ __    __ _    ___     _ __ ___     ___     __| |  ___
@@ -248,7 +335,7 @@ jobs:
 # This step also generates the final packages for 32 bit lnx.
   mod-merger:
     runs-on: ubuntu-20.04
-    needs: [ version, lnx64-mod, lnx32-mod, osx-mod, win-mod, win64-mod, lnx-aarch64-mod ]
+    needs: [ version, lnx64-mod, lnx32-mod, osx-mod, win-mod, win64-mod, lnx-aarch64-mod, android-mod ]
     steps:
 
       - uses: actions/download-artifact@v4
