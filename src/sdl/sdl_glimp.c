@@ -1108,6 +1108,13 @@ static qboolean GLimp_StartDriverAndSetMode(glconfig_t *glConfig, int mode, qboo
 			SDL_setenv("SDL_VIDEODRIVER", r_sdlDriver->string, 0);
 		}
 
+#ifdef WIN32
+		// This hint must be set before initializing the video subsystem.
+		// The main purpose of declaring DPI awareness is to disable OS bitmap
+		// scaling of SDL windows on monitors with a DPI scale factor.
+		SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "system");
+#endif
+
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
 		{
 			Com_Printf("SDL_Init(SDL_INIT_VIDEO) FAILED (%s)\n", SDL_GetError());
