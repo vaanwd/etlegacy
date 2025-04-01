@@ -571,8 +571,9 @@ qboolean G_SpectatorAttackFollow(gentity_t *ent)
 
 	if ((&g_entities[tr.entityNum])->client)
 	{
-		ent->client->sess.spectatorState  = SPECTATOR_FOLLOW;
-		ent->client->sess.spectatorClient = tr.entityNum;
+		ent->client->sess.spectatorState      = SPECTATOR_FOLLOW;
+		ent->client->sess.spectatorClient     = tr.entityNum;
+		ent->client->sess.userSpectatorClient = tr.entityNum;
 		return qtrue;
 	}
 	return qfalse;
@@ -687,12 +688,12 @@ void SpectatorThink(gentity_t *ent, usercmd_t *ucmd)
 			// to prevent constant traces done by server.
 			if (client->buttons & BUTTON_WALKING)
 			{
-				Cmd_FollowCycle_f(ent, 1, qtrue);
+				Cmd_FollowCycle_f(ent, 1, qtrue, qfalse);
 			}
 			// no humans playing?.. then follow a bot
 			if (client->sess.spectatorState != SPECTATOR_FOLLOW)
 			{
-				Cmd_FollowCycle_f(ent, 1, qfalse);
+				Cmd_FollowCycle_f(ent, 1, qfalse, qfalse);
 			}
 		}
 		// attack + walk button cycles through non-bot/human players
@@ -701,7 +702,7 @@ void SpectatorThink(gentity_t *ent, usercmd_t *ucmd)
 	else if ((client->buttons & BUTTON_ATTACK) && !(client->oldbuttons & BUTTON_ATTACK) &&
 	         !(client->buttons & BUTTON_ACTIVATE))
 	{
-		Cmd_FollowCycle_f(ent, 1, (client->buttons & BUTTON_WALKING));
+		Cmd_FollowCycle_f(ent, 1, (client->buttons & BUTTON_WALKING), qfalse);
 	}
 #ifdef ETLEGACY_DEBUG
 #ifdef FEATURE_OMNIBOT
@@ -815,30 +816,40 @@ qboolean ClientInactivityTimer(gclient_t *client)
 		{
 			int secondsLeft = (client->inactivityTime + inactivity - level.time) / 1000;
 
-			// countdown expired..
-			if (secondsLeft <= 0)
+			if (client->inactivitySecondsLeft != secondsLeft)
 			{
-				CPx(client - level.clients, "cp \"^3Moved to spectator for inactivity\n\"");
-			}
-			// display a message at 30 seconds, and countdown at last 10 ..
-			else if (secondsLeft <= 10 || secondsLeft == 30)
-			{
-				CPx(client - level.clients, va("cp \"^1%i ^3seconds until moving to spectator for inactivity\n\"", secondsLeft));
+				client->inactivitySecondsLeft = secondsLeft;
+
+				// countdown expired..
+				if (secondsLeft <= 0)
+				{
+					CPx(client - level.clients, "cp \"^3Moved to spectator for inactivity\n\"");
+				}
+				// display a message at 30 seconds, and countdown at last 10 ..
+				else if (secondsLeft <= 10 || secondsLeft == 30)
+				{
+					CPx(client - level.clients, va("cp \"^1%i ^3seconds until moving to spectator for inactivity\n\"", secondsLeft));
+				}
 			}
 		}
 		else if (doDrop && g_spectatorInactivity.integer && !inTeam)
 		{
 			int secondsLeft = (client->inactivityTime + inactivityspec - level.time) / 1000;
 
-			// countdown expired..
-			if (secondsLeft <= 0)
+			if (client->inactivitySecondsLeft != secondsLeft)
 			{
-				CPx(client - level.clients, "cp \"^3Dropped for inactivity\n\"");
-			}
-			// display a message at 30 seconds, and countdown at last 10 ..
-			else if (secondsLeft <= 10 || secondsLeft == 30)
-			{
-				CPx(client - level.clients, va("cp \"^1%i ^3seconds until inactivity drop\n\"", secondsLeft));
+				client->inactivitySecondsLeft = secondsLeft;
+
+				// countdown expired..
+				if (secondsLeft <= 0)
+				{
+					CPx(client - level.clients, "cp \"^3Dropped for inactivity\n\"");
+				}
+				// display a message at 30 seconds, and countdown at last 10 ..
+				else if (secondsLeft <= 10 || secondsLeft == 30)
+				{
+					CPx(client - level.clients, va("cp \"^1%i ^3seconds until inactivity drop\n\"", secondsLeft));
+				}
 			}
 		}
 	}
@@ -861,6 +872,14 @@ qboolean ClientInactivityTimer(gclient_t *client)
 			trap_DropClient(client - level.clients, "Dropped due to inactivity", 0);
 			return qfalse;
 		}
+	}
+
+	// sending a command to client could possibly lead to reliable command overflow
+	// which leads to client being kicked and it's data wiped, but the rest of the 'client think' and 'pmove' could happen after anyway
+	// which would be undefined behaviour that could be (and possibly is according to reports) leading to server crashes
+	if (client->pers.connected == CON_DISCONNECTED)
+	{
+		return qfalse;
 	}
 
 	// do not kick by default

@@ -1877,8 +1877,12 @@ void CG_AddPlayerWeapon(refEntity_t *parent, playerState_t *ps, centity_t *cent)
 			else if (weaponNum == WP_COLT || weaponNum == WP_LUGER || weaponNum == WP_SILENCED_COLT || weaponNum == WP_SILENCER)
 			{
 				if ((i == 3 /* left hand */ && (ps->weaponstate != WEAPON_RELOADING /* show only during reload */))
-				    || (weaponNum == WP_SILENCER && i == 5 /* excess normally out-of-view hand */)
-				    || (weaponNum == WP_SILENCED_COLT && i == 6 /* excess normally out-of-view hand */))
+				    || (weaponNum == WP_SILENCER /* silenced luger */ && i == 5 /* extra hand with which to screw luger silencer */ && (cg.predictedPlayerEntity.pe.weap.frame < 55) /* hide it unless when actually screwing */)
+				    || (weaponNum == WP_SILENCED_COLT && i == 6 /* extra hand with which to screw colt silencer */ && (
+							(cg.predictedPlayerEntity.pe.weap.frame < 55 /* hide it unless when actually screwing */)
+							|| (cg.predictedPlayerEntity.pe.weap.frame > 79 && cg.predictedPlayerEntity.pe.weap.frame < 82 /* skip some bad tag pos that causes the hand to briefly pop on the left-hand-side of the view when screwing on the silencer */)
+							))
+				    )
 				{
 					continue;
 				}
@@ -2626,15 +2630,16 @@ static void CG_ApplyViewWeaponShift(refEntity_t *hand, vec3_t shifts_90, vec3_t 
 	}
 	else
 	{
+		float fov = (cg_fov.value < 90) ? 90 : cg_fov.value;
 		// interpolate via the distance of 'shifts_90' and 'shifts_120'
 		VectorMA(hand->origin,
-		         shifts_120[0] - ((120.0f - cg_fov.value) * ((shifts_120[0] - shifts_90[0]) / 30)),
+		         shifts_120[0] - ((120.0f - fov) * ((shifts_120[0] - shifts_90[0]) / 30)),
 		         up, hand->origin);
 		VectorMA(hand->origin,
-		         shifts_120[1] - ((120.0f - cg_fov.value) * ((shifts_120[1] - shifts_90[1]) / 30)),
+		         shifts_120[1] - ((120.0f - fov) * ((shifts_120[1] - shifts_90[1]) / 30)),
 		         forward, hand->origin);
 		VectorMA(hand->origin,
-		         shifts_120[2] - ((120.0f - cg_fov.value) * ((shifts_120[2] - shifts_90[2]) / 30)),
+		         shifts_120[2] - ((120.0f - fov) * ((shifts_120[2] - shifts_90[2]) / 30)),
 		         right,
 		         hand->origin);
 	}
@@ -2887,6 +2892,20 @@ void CG_AddViewWeapon(playerState_t *ps)
 		gunoff[0] = cg_gun_x.value;
 		gunoff[1] = cg_gun_y.value;
 		gunoff[2] = cg_gun_z.value;
+
+		// slowly raise gun from the bottom of the viewport when standing
+		// up/being revived
+		if ((cg_gunReviveFadeIn.value) && ((cg.lastBeingRevivedTime + 2000) >= cg.time))
+		{
+			double offset;
+			int    diff = (cg.lastBeingRevivedTime + 2000) - cg.time;
+
+			offset  = ((double)diff / 2000.0f);
+			offset *= (weapon->reviveLowerHeight) ? (weapon->reviveLowerHeight) : 4.5;
+			offset *= offset;
+
+			gunoff[2] -= offset;
+		}
 
 		VectorMA(hand->origin, gunoff[0], cg.refdef_current->viewaxis[0], hand->origin);
 		VectorMA(hand->origin, gunoff[1], cg.refdef_current->viewaxis[1], hand->origin);

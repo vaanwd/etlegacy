@@ -994,6 +994,7 @@ typedef struct weaponInfo_s
 
 	vec3_t fireRecoil;                  ///< kick angle
 	vec3_t adjustLean;
+	float reviveLowerHeight;
 
 	sfxHandle_t readySound;             ///< an ambient sound the weapon makes when it's /not/ firing
 	sfxHandle_t firingSound;
@@ -1333,6 +1334,7 @@ typedef struct
 	float damageX, damageY, damageValue;
 
 	int grenLastTime;
+	int lastBeingRevivedTime;
 	int lastReviveTime;
 
 	int switchbackWeapon;
@@ -1733,6 +1735,7 @@ typedef struct
 	qhandle_t commandCentreAxisMineShader;
 	qhandle_t commandCentreAlliedMineShader;
 	qhandle_t commandCentreSpawnShader[2];
+	qhandle_t commandCentreSpawnShadow;
 	qhandle_t blackmask;
 
 	qhandle_t landmineHintShader;
@@ -2614,6 +2617,7 @@ typedef struct cgs_s
 	int ccSelectedLayer;
 	int ccSelectedObjective;
 	int ccSelectedSpawnPoint;
+	int ccResolvedSpawnPoint;
 	int ccSelectedTeam;                                 ///< ( 1 = ALLIES, 0 = AXIS )
 	int ccSelectedWeaponSlot;                           ///< ( 0 = secondary, 1 = primary)
 	int ccSelectedClass;
@@ -2780,6 +2784,7 @@ extern vmCvar_t cg_bloodPuff;
 extern vmCvar_t cg_brassTime;
 extern vmCvar_t cg_gun_frame;
 extern vmCvar_t cg_gunFovOffset;
+extern vmCvar_t cg_gunReviveFadeIn;
 extern vmCvar_t cg_gun_x;
 extern vmCvar_t cg_gun_y;
 extern vmCvar_t cg_gun_z;
@@ -3262,6 +3267,7 @@ void CG_Text_PaintChar(float x, float y, float width, float height, float scale,
 void CG_DrawWeapHeat(rectDef_t *rect, int align, qboolean dynamicColor);
 void CG_DrawPlayerWeaponIcon(rectDef_t *rect, int align, vec4_t *refcolor);
 int CG_CalculateReinfTime(team_t team);
+int CG_CalculateReinfTimeEx(int period, int offset);
 int CG_GetReinfTime(qboolean menu);
 void CG_Fade(int r, int g, int b, int a, int time, int duration);
 
@@ -4075,6 +4081,7 @@ qboolean CG_LimboPanel_ClassIsDisabled(team_t selectedTeam, int classIndex);
 qboolean CG_LimboPanel_TeamIsDisabled(team_t checkTeam);
 int CG_LimboPanel_FindFreeClass(team_t checkTeam);
 int CG_LimboPanel_GetWeaponNumberForPos(int pos);
+void CG_LimboPanel_SelectLoadout();
 
 /**
  * @struct mapScissor_s

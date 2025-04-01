@@ -159,6 +159,7 @@ vmCvar_t cg_weapBankCollisions;
 vmCvar_t cg_weapSwitchNoAmmoSounds;
 vmCvar_t cg_gun_frame;
 vmCvar_t cg_gunFovOffset;
+vmCvar_t cg_gunReviveFadeIn;
 vmCvar_t cg_gun_x;
 vmCvar_t cg_gun_y;
 vmCvar_t cg_gun_z;
@@ -443,6 +444,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_brassTime,                          "cg_brassTime",                          "2500",        CVAR_ARCHIVE,                 0 },
 	{ &cg_markTime,                           "cg_markTime",                           "20000",       CVAR_ARCHIVE,                 0 },
 	{ &cg_bloodPuff,                          "cg_bloodPuff",                          "1",           CVAR_ARCHIVE,                 0 },
+	{ &cg_gunReviveFadeIn,                    "cg_gunReviveFadeIn",                    "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_gunFovOffset,                       "cg_gunFovOffset",                       "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_gun_x,                              "cg_gunX",                               "0",           CVAR_TEMP,                    0 },
 	{ &cg_gun_y,                              "cg_gunY",                               "0",           CVAR_TEMP,                    0 },
@@ -1438,7 +1440,7 @@ void CG_SetupDlightstyles(void)
 		cent   = &cg_entities[entnum];
 
 		token = COM_Parse(&str);     // stylestring
-		Q_strncpyz(cent->dl_stylestring, token, strlen(token));
+		Q_strncpyz(cent->dl_stylestring, token, sizeof(cent->dl_stylestring));
 
 		token             = COM_Parse(&str); // offset
 		cent->dl_frame    = Q_atoi(token);
@@ -1877,6 +1879,7 @@ static void CG_RegisterGraphics(void)
 	cgs.media.commandCentreAlliedMineShader     = trap_R_RegisterShaderNoMip("sprites/landmine_allied");
 	cgs.media.commandCentreSpawnShader[0]       = trap_R_RegisterShaderNoMip("gfx/limbo/cm_flagaxis");
 	cgs.media.commandCentreSpawnShader[1]       = trap_R_RegisterShaderNoMip("gfx/limbo/cm_flagallied");
+	cgs.media.commandCentreSpawnShadow          = trap_R_RegisterShaderNoMip("gfx/limbo/cm_flagshadow");
 	cgs.media.compassConstructShader            = trap_R_RegisterShaderNoMip("sprites/construct.tga");
 	cgs.media.blackmask                         = trap_R_RegisterShaderNoMip("images/blackmask"); // etpro icons support
 
