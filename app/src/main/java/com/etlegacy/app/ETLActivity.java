@@ -49,7 +49,9 @@ import org.libsdl.app.*;
 import java.lang.reflect.Type;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 public class ETLActivity extends SDLActivity implements JoyStickListener {
 
@@ -149,6 +151,37 @@ public class ETLActivity extends SDLActivity implements JoyStickListener {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
 			getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
 		}
+	}
+
+	@Override
+	public boolean dispatchKeyEvent(KeyEvent event) {
+		int keyCode = event.getKeyCode();
+		int action = event.getAction();
+
+		// Define special keys that need immediate key up after key down
+		Set<Integer> specialKeys = new HashSet<>();
+		specialKeys.add(KeyEvent.KEYCODE_ESCAPE);
+		specialKeys.add(KeyEvent.KEYCODE_GRAVE);
+		specialKeys.add(KeyEvent.KEYCODE_DEL);
+
+		// Add number keys (0-9)
+		for (int i = KeyEvent.KEYCODE_0; i <= KeyEvent.KEYCODE_9; i++) {
+			specialKeys.add(i);
+		}
+
+
+		if (action == KeyEvent.ACTION_DOWN) {
+			if (specialKeys.contains(keyCode)) {
+				onNativeKeyDown(keyCode);
+				onNativeKeyUp(keyCode);
+				return true;
+			}
+			onNativeKeyDown(keyCode);
+		} else if (action == KeyEvent.ACTION_UP) {
+			onNativeKeyUp(keyCode);
+		}
+
+		return super.dispatchKeyEvent(event);
 	}
 
 	private void toggleKeyboard() {
@@ -620,10 +653,12 @@ public class ETLActivity extends SDLActivity implements JoyStickListener {
 
 	private int runUI() {
 		if (InputDeviceChecker.hasUSBMouseOrKeyboardConnected() || InputDeviceChecker.hasBluetoothMouseOrKeyboardConnected()) {
+			getWindow().setFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM, WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
 			setViewVisibility(false, etl_console, btn, esc_btn, gears, shootBtn, reloadBtn, jumpBtn, activateBtn, altBtn, crouchBtn, moveJoystick, toggleRecyclerButton);
 			return 500;
 		}
 		else {
+			getWindow().clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
 			if (!getUiMenu()) {
 				setViewVisibility(true, etl_console, btn, esc_btn, gears, shootBtn);
 				setViewVisibility(false, reloadBtn, jumpBtn, activateBtn, altBtn, crouchBtn, moveJoystick, toggleRecyclerButton);
