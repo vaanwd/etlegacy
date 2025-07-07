@@ -870,6 +870,47 @@ float angle_lerp(float from, float to, float frac)
 }
 
 /**
+ * Returns 'from' moved towards 'to' by at most 'frac' and at most 'max_delta', as a shortest path angle in [0,360)
+ */
+float angle_lerp_max_delta(float from, float to, float frac, float max_delta)
+{
+	float result = to - from;
+
+	// Shortest signed delta in (-180, 180]
+	if (result > 180.0f)
+	{
+		result -= 360.0f;
+	}
+	else if (result < -180.0f)
+	{
+		result += 360.0f;
+	}
+
+	// Clamp step to +/-max_delta
+	result = result * frac;
+	if (result > max_delta)
+	{
+		result = max_delta;
+	}
+	else if (result < -max_delta)
+	{
+		result = -max_delta;
+	}
+
+	// Result with wrapping
+	result = from + result;
+	if (result < 0.0f)
+	{
+		result += 360.0f;
+	}
+	else if (result >= 360.0f)
+	{
+		result -= 360.0f;
+	}
+	return result;
+}
+
+/**
  * @brief vec3_lerp
  * @param[in] start
  * @param[in] end
@@ -1121,7 +1162,7 @@ int BoxOnPlaneSide(const vec3_t emins, const vec3_t emaxs, struct cplane_s *p)
 #else
 #pragma warning( disable: 4035 )
 
-__inline __declspec(naked) int BoxOnPlaneSide_fast(vec3_t emins, vec3_t emaxs, struct cplane_s *p)
+__inline __declspec(naked) int BoxOnPlaneSide_fast(const vec3_t emins, const vec3_t emaxs, struct cplane_s *p)
 {
 	static int bops_initialized;
 	static int Ljmptab[8];
@@ -1351,7 +1392,7 @@ Lerror:
 	}
 }
 
-int BoxOnPlaneSide(vec3_t emins, vec3_t emaxs, struct cplane_s *p)
+int BoxOnPlaneSide(const vec3_t emins, const vec3_t emaxs, struct cplane_s *p)
 {
 	// fast axial cases
 
@@ -1549,7 +1590,7 @@ qboolean vec3_compare(const vec3_t v1, const vec3_t v2)
  */
 qboolean vec4_compare(const vec4_t v1, const vec4_t v2)
 {
-    return v1[0] != v2[0] || v1[1] != v2[1] || v1[2] != v2[2] || v1[3] != v2[3];
+	return v1[0] != v2[0] || v1[1] != v2[1] || v1[2] != v2[2] || v1[3] != v2[3];
 }
 
 /**

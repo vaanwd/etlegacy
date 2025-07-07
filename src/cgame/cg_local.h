@@ -708,11 +708,10 @@ typedef struct clientInfo_s
 #ifdef FEATURE_PRESTIGE
 	int prestige;
 #endif
-
-#ifdef FEATURE_MULTIVIEW
-	// per client MV ps info
 	int ammo;
 	int ammoclip;
+#ifdef FEATURE_MULTIVIEW
+	// per client MV ps info
 	int chargeTime;
 	qboolean fCrewgun;
 	int cursorHint;
@@ -3089,7 +3088,7 @@ void CG_LoadObjectiveData(void);
 
 void QDECL CG_Printf(const char *msg, ...) _attribute((format(printf, 1, 2)));
 void QDECL CG_DPrintf(const char *msg, ...) _attribute((format(printf, 1, 2)));
-void QDECL CG_Error(const char *msg, ...) _attribute((noreturn, format(printf, 1, 2)));
+NORETURN_MSVC void QDECL CG_Error(const char *msg, ...) _attribute((noreturn, format(printf, 1, 2)));
 
 void CG_StartMusic(void);
 void CG_QueueMusic(void);
@@ -3230,7 +3229,7 @@ void CG_AddLineToScene(const vec3_t start, const vec3_t end, const vec4_t colour
 #define GIZMO_DEFAULT_RADIUS 32.f
 
 void CG_DrawRotateGizmo(const vec3_t origin, float radius, int numSegments, int activeAxis);
-void CG_DrawMoveGizmo(const vec3_t origin, float radius, int activeAxis);
+void CG_DrawMoveGizmo(const vec3_t origin, float radius, int activeAxis, qboolean drawTip);
 void CG_DrawSprite(const vec3_t origin, float radius, qhandle_t shader, byte color[4]);
 
 /**
@@ -3267,7 +3266,6 @@ void CG_Text_PaintChar(float x, float y, float width, float height, float scale,
 void CG_DrawWeapHeat(rectDef_t *rect, int align, qboolean dynamicColor);
 void CG_DrawPlayerWeaponIcon(rectDef_t *rect, int align, vec4_t *refcolor);
 int CG_CalculateReinfTime(team_t team);
-int CG_CalculateReinfTimeEx(int period, int offset);
 int CG_GetReinfTime(qboolean menu);
 void CG_Fade(int r, int g, int b, int a, int time, int duration);
 
@@ -3319,6 +3317,7 @@ qboolean CG_AddCEntity_Filter(centity_t *cent);
 qboolean CG_AddLinkedEntity(centity_t *cent, qboolean ignoreframe, int atTime);
 void CG_PositionEntityOnTag(refEntity_t *entity, const refEntity_t *parent, const char *tagName, int startIndex, vec3_t *offset);
 void CG_PositionRotatedEntityOnTag(refEntity_t *entity, const refEntity_t *parent, const char *tagName);
+void CG_EBS_Shoutcast(centity_t *cent);
 
 // cg_weapons_io.c
 void CG_RegisterWeapon(int weaponNum, qboolean force);
@@ -3592,6 +3591,8 @@ void CG_parseWeaponStats_cmd(void(txt_dump) (const char *));
 void CG_UpdateSvCvars(void);
 void CG_ResetVoiceSprites(qboolean revived);
 
+void CG_ParseDemoVersion(void);
+
 /**
  * @struct consoleCommand_t
  * @brief
@@ -3622,7 +3623,7 @@ void CG_ResetTimers(void);
 void trap_Print(const char *fmt);
 
 // abort the game
-void trap_Error(const char *fmt) _attribute((noreturn));
+NORETURN_MSVC void trap_Error(const char *fmt) _attribute((noreturn));
 
 // milliseconds should only be used for performance tuning, never
 // for anything game related.  Get time from the CG_DrawActiveFrame parameter
