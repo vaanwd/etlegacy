@@ -314,6 +314,8 @@ vmCvar_t cg_tracers;
 vmCvar_t cg_fireteamNameMaxChars;
 vmCvar_t cg_fireteamNameAlign;
 vmCvar_t cg_fireteamSprites;
+vmCvar_t cg_fireteamSpritesColor;
+vmCvar_t cg_fireteamSpritesColorSelected;
 
 vmCvar_t cg_weapaltReloads;
 vmCvar_t cg_weapaltSwitches;
@@ -398,6 +400,12 @@ vmCvar_t cg_customCrosshairCrossColor;
 vmCvar_t cg_customCrosshairCrossOutlineRounded;
 vmCvar_t cg_customCrosshairCrossOutlineColor;
 vmCvar_t cg_customCrosshairCrossOutlineWidth;
+
+vmCvar_t cg_scopeReticleStyle;
+vmCvar_t cg_scopeReticleColor;
+vmCvar_t cg_scopeReticleDotColor;
+vmCvar_t cg_scopeReticleLineThickness;
+vmCvar_t cg_scopeReticleDotThickness;
 
 vmCvar_t cg_commandMapTime;
 
@@ -622,6 +630,8 @@ static cvarTable_t cvarTable[] =
 	{ &cg_fireteamNameMaxChars,               "cg_fireteamNameMaxChars",               "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_fireteamNameAlign,                  "cg_fireteamNameAlign",                  "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_fireteamSprites,                    "cg_fireteamSprites",                    "1",           CVAR_ARCHIVE,                 0 },
+	{ &cg_fireteamSpritesColor,               "cg_fireteamSpritesColor",               "Green",       CVAR_ARCHIVE,                 0 },
+	{ &cg_fireteamSpritesColorSelected,       "cg_fireteamSpritesColorSelected",       "Red",         CVAR_ARCHIVE,                 0 },
 
 	{ &cg_simpleItems,                        "cg_simpleItems",                        "0",           CVAR_ARCHIVE,                 0 },           // Bugged atm
 	{ &cg_simpleItemsScale,                   "cg_simpleItemsScale",                   "1.0",         CVAR_ARCHIVE,                 0 },
@@ -688,13 +698,19 @@ static cvarTable_t cvarTable[] =
 	{ &cg_customCrosshairDotOutlineWidth,     "cg_customCrosshairDotOutlineWidth",     "1.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossWidth,          "cg_customCrosshairCrossWidth",          "2.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossLength,         "cg_customCrosshairCrossLength",         "8.0",         CVAR_ARCHIVE,                 0 },
-	{ &cg_customCrosshairCrossGap,            "cg_customCrosshairCrossGap",            "2.0",         CVAR_ARCHIVE,                 0 },
-	{ &cg_customCrosshairCrossSpreadDistance, "cg_customCrosshairCrossSpreadDistance", "10.0",        CVAR_ARCHIVE,                 0 },
+	{ &cg_customCrosshairCrossGap,            "cg_customCrosshairCrossGap",            "4.0",         CVAR_ARCHIVE,                 0 },
+	{ &cg_customCrosshairCrossSpreadDistance, "cg_customCrosshairCrossSpreadDistance", "25.0",        CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossSpreadOTGCoef,  "cg_customCrosshairCrossSpreadOTGCoef",  "2.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossColor,          "cg_customCrosshairCrossColor",          "#00FF00E6",   CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossOutlineRounded, "cg_customCrosshairCrossOutlineRounded", "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossOutlineColor,   "cg_customCrosshairCrossOutlineColor",   "#000000E6",   CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossOutlineWidth,   "cg_customCrosshairCrossOutlineWidth",   "1.0",         CVAR_ARCHIVE,                 0 },
+
+	{ &cg_scopeReticleStyle,                  "cg_scopeReticleStyle",                  "0",           CVAR_ARCHIVE,                 0 },
+	{ &cg_scopeReticleColor,                  "cg_scopeReticleColor",                  "#000000FF",   CVAR_ARCHIVE,                 0 },
+	{ &cg_scopeReticleDotColor,               "cg_scopeReticleDotColor",               "#000000FF",   CVAR_ARCHIVE,                 0 },
+	{ &cg_scopeReticleLineThickness,          "cg_scopeReticleLineThickness",          "2.0",         CVAR_ARCHIVE,                 0 },
+	{ &cg_scopeReticleDotThickness,           "cg_scopeReticleDotThickness",           "2.0",         CVAR_ARCHIVE,                 0 },
 
 	{ &cg_commandMapTime,                     "cg_commandMapTime",                     "0",           CVAR_ARCHIVE,                 0 },
 };
@@ -725,6 +741,27 @@ static qboolean CG_RegisterOrUpdateCvars(cvarTable_t *cv)
 		Q_ParseColor(cg_customCrosshairCrossOutlineColor.string, cgs.customCrosshairCrossOutlineColor);
 		return qtrue;
 	}
+	else if (cv->vmCvar == &cg_scopeReticleColor)
+	{
+		Q_ParseColor(cg_scopeReticleColor.string, cgs.scopeReticleColor);
+		return qtrue;
+	}
+	else if (cv->vmCvar == &cg_scopeReticleDotColor)
+	{
+		Q_ParseColor(cg_scopeReticleDotColor.string, cgs.scopeReticleDotColor);
+		return qtrue;
+	}
+	else if (cv->vmCvar == &cg_fireteamSpritesColor)
+	{
+		Q_ParseColor(cg_fireteamSpritesColor.string, cgs.fireteamSpritesColor);
+		return qtrue;
+	}
+	else if (cv->vmCvar == &cg_fireteamSpritesColorSelected)
+	{
+		Q_ParseColor(cg_fireteamSpritesColorSelected.string, cgs.fireteamSpritesColorSelected);
+		return qtrue;
+	}
+
 	return qfalse;
 }
 
@@ -1835,7 +1872,7 @@ static void CG_RegisterGraphics(void)
 	cgs.media.notUsableHintShader     = trap_R_RegisterShader("gfx/2d/legacy_notUsableHint");
 	cgs.media.doorHintShader          = trap_R_RegisterShader("gfx/2d/doorHint");
 	cgs.media.doorRotateHintShader    = trap_R_RegisterShader("gfx/2d/doorRotateHint");             // TODO: no icon, add it ?
-	cgs.media.doorLockHintShader      = trap_R_RegisterShader("gfx/2d/lockedhint");
+	cgs.media.doorLockHintShader      = trap_R_RegisterShader("gfx/2d/legacy_lockedhint");
 	cgs.media.mg42HintShader          = trap_R_RegisterShader("gfx/2d/mg42Hint");                   // TODO: no icon, add it ?
 	cgs.media.breakableHintShader     = trap_R_RegisterShader("gfx/2d/legacy_breakableHint");
 	cgs.media.healthHintShader        = trap_R_RegisterShader("gfx/2d/legacy_healthHint");          // TODO: no icon, add it ?

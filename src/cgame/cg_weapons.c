@@ -2787,7 +2787,6 @@ void CG_AddViewWeapon(playerState_t *ps)
 	// drop gun lower at higher fov
 	if (cg_fov.value >= 75)
 	{
-		fovOffset = -0.2f * (cg_fov.value - cg_gunFovOffset.integer);
 		fovOffset = -0.2f * (cg_fov.value - (cg_gunFovOffset.integer ? cg_gunFovOffset.integer : 90 /* ETL dyn fov values were determined with 90 as reference */));
 	}
 	else
@@ -5340,9 +5339,11 @@ static void CG_AddFleshImpact(vec3_t end, vec3_t dir, int fleshEntityNum)
 	vec3_t    tmpv, tmpv2;
 	int       i, headshot;
 	centity_t *cent  = &cg_entities[fleshEntityNum];
-	qhandle_t shader = cg_blood.integer ? cgs.media.fleshSmokePuffShader : cgs.media.smokePuffShader;
+	qhandle_t shader = (cent->currentState.powerups & (1 << PW_INVULNERABLE))
+	    ? cgs.media.smokePuffShader
+	    : cgs.media.fleshSmokePuffShader;
 
-	if (ISVALIDCLIENTNUM(fleshEntityNum))
+	if (ISVALIDCLIENTNUM(fleshEntityNum) && !(cent->currentState.powerups & (1 << PW_INVULNERABLE)))
 	{
 		CG_Bleed(end, fleshEntityNum);
 	}
@@ -5405,7 +5406,10 @@ static void CG_AddFleshImpact(vec3_t end, vec3_t dir, int fleshEntityNum)
 		}
 	}
 
-	CG_AddBloodSplat(origin, end, dir);
+	if (!(cent->currentState.powerups & (1 << PW_INVULNERABLE)))
+	{
+		CG_AddBloodSplat(origin, end, dir);
+	}
 }
 
 /**
