@@ -649,6 +649,9 @@ typedef struct clientInfo_s
 	int breathPuffTime;
 	int cls;
 	int latchedcls;
+	int spawnpt;
+	int mspawnpt;
+	int spawnChangedTime;
 	int ping;
 
 	int rank;
@@ -1418,6 +1421,9 @@ typedef struct
 	int numMiscGameModels;
 	int numCoronas;
 	int numSpawnpointEnts;
+	int numMajorSpawnpointEnts;
+
+	qboolean hasMinorSpawnPoints;
 
 	qboolean showCampaignBriefing;
 	qboolean showGameView;
@@ -2613,6 +2619,7 @@ typedef struct cgs_s
 	cg_gamemodel_t miscGameModels[MAX_STATIC_GAMEMODELS];
 	cg_corona_t corona[MAX_GAMECORONAS];
 	cg_spawnpoint_t spawnpointEnt[MAX_GENTITIES];
+	cg_spawnpoint_t majorSpawnpointEnt[MAX_GENTITIES];
 
 	vec2_t ccMenuPos;
 	qboolean ccMenuShowing;
@@ -3031,6 +3038,7 @@ extern vmCvar_t cg_customCrosshairCrossColor;
 extern vmCvar_t cg_customCrosshairCrossOutlineRounded;
 extern vmCvar_t cg_customCrosshairCrossOutlineColor;
 extern vmCvar_t cg_customCrosshairCrossOutlineWidth;
+extern vmCvar_t cg_customCrosshairDynamicColor;
 
 extern vmCvar_t cg_scopeReticleStyle;
 extern vmCvar_t cg_scopeReticleColor;
@@ -4450,7 +4458,7 @@ typedef struct hudStructure_s
 
 #define MAXHUDS 32
 #define MAXSTYLES 24
-#define CURRENT_HUD_JSON_VERSION 4
+#define CURRENT_HUD_JSON_VERSION 5
 #define DEFAULTHUD "ETmain"
 
 typedef struct
