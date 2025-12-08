@@ -2001,7 +2001,7 @@ static void CG_DemoRewindFixEffects(void)
 	}
 
 	// clear message buffer
-	for (i = 0; i < TEAMCHAT_HEIGHT; i++)
+	for (i = 0; i < TEAMCHAT_MSG_MAX; i++)
 	{
 		if (cgs.teamChatMsgTimes[i] > cg.time)
 		{
@@ -2017,6 +2017,22 @@ static void CG_DemoRewindFixEffects(void)
 		if (cg.viewDamage[i].damageTime > cg.time)
 		{
 			cg.viewDamage[i].damageTime = 0;
+		}
+	}
+
+	for (i = 0; i < cg.snap->numEntities; i++)
+	{
+		centity_t *cent = &cg_entities[cg.snap->entities[i].number];
+
+		if (cent->currentState.number < MAX_CLIENTS)
+		{
+			continue;
+		}
+
+		// reset time for landmine flag
+		if (cent->currentState.weapon == WP_LANDMINE)
+		{
+			cent->lerpFrame.frameTime = cg.time;
 		}
 	}
 

@@ -34,7 +34,7 @@
 
 #include "cg_local.h"
 
-#define NUM_PM_STACK           3
+#define NUM_PM_STACK           4
 #define NUM_PM_STACK_ITEMS     32
 #define NUM_PM_STACK_ITEMS_BIG 3 // we shouldn't need many of these
 #define NUM_PM_STACK_ITEMS_XP  32
@@ -101,6 +101,7 @@ void CG_InitPMGraphics(void)
 	cgs.media.pmImages[PM_HEALTHPICKUP]   = trap_R_RegisterShaderNoMip("gfx/limbo/filter_healthammo");
 	cgs.media.pmImages[PM_WEAPONPICKUP]   = trap_R_RegisterShaderNoMip("sprites/voiceChat");
 	cgs.media.pmImages[PM_CONNECT]        = trap_R_RegisterShaderNoMip("sprites/voiceChat");
+	cgs.media.pmImages[PM_ANNOUNCE]       = trap_R_RegisterShaderNoMip("sprites/voiceChat");
 
 	cgs.media.pmImageAlliesConstruct = trap_R_RegisterShaderNoMip("gfx/hud/pm_constallied");
 	cgs.media.pmImageAxisConstruct   = trap_R_RegisterShaderNoMip("gfx/hud/pm_constaxis");
@@ -334,11 +335,13 @@ qboolean CG_CheckPMItemFilter(popupMessageType_t type, int filter)
 	case PM_TEAM:
 		return filter & POPUP_FILTER_TEAMJOIN;
 	case PM_MESSAGE:
+		return filter & POPUP_FILTER_ECHO;
 	case PM_DYNAMITE:
 	case PM_CONSTRUCTION:
 	case PM_MINES:
 	case PM_OBJECTIVE:
 	case PM_DESTRUCTION:
+	case PM_ANNOUNCE:
 		return filter & POPUP_FILTER_MISSION;
 	case PM_AMMOPICKUP:
 	case PM_HEALTHPICKUP:
@@ -779,7 +782,7 @@ static qboolean CG_DrawPMItems(hudComponent_t *comp, pmListItem_t *listItem, flo
 	}
 
 	w = comp->location.w - size * 2;
-	CG_WordWrapString(buffer, CG_GetMaxCharsPerLine(buffer, scale, &cgs.media.limboFont2, w), buffer, sizeof(buffer), &lineNumber);
+	CG_WordWrapString(buffer, CG_MaxCharsForWidth(buffer, scale, &cgs.media.limboFont2, w), buffer, sizeof(buffer), &lineNumber);
 
 	// we reach the comp border, don't print the line
 	if (scrollDown)
@@ -1057,7 +1060,7 @@ static qboolean CG_DrawPMXPItems(hudComponent_t *comp, pmListItem_t *listItem, f
 	}
 
 	w = comp->location.w - size * 2;
-	CG_WordWrapString(buffer, CG_GetMaxCharsPerLine(buffer, scale * 0.75, &cgs.media.limboFont2, w), buffer, sizeof(buffer), &lineNumber);
+	CG_WordWrapString(buffer, CG_MaxCharsForWidth(buffer, scale * 0.75, &cgs.media.limboFont2, w), buffer, sizeof(buffer), &lineNumber);
 
 	// we reach the comp border, don't print the line
 	if (scrollDown)

@@ -103,7 +103,6 @@ extern vmCvar_t cg_scopedSensitivityScaler;
 extern vmCvar_t cg_synchronousClients;
 #endif // ALLOW_GSYNC
 extern vmCvar_t cg_teamChatTime;
-extern vmCvar_t cg_teamChatHeight;
 extern vmCvar_t cg_teamChatMention;
 extern vmCvar_t cg_stats;
 extern vmCvar_t cg_coronafardist;
@@ -152,6 +151,7 @@ extern vmCvar_t cg_autoReload;
 extern vmCvar_t cg_bloodDamageBlend;
 extern vmCvar_t cg_bloodFlash;
 extern vmCvar_t cg_bloodFlashTime;
+extern vmCvar_t cg_bloodForcePuffsForDamage;
 extern vmCvar_t cg_noAmmoAutoSwitch;
 extern vmCvar_t cg_printObjectiveInfo;
 #ifdef FEATURE_MULTIVIEW
@@ -306,7 +306,7 @@ extern vmCvar_t cg_customCrosshairCrossColor;
 extern vmCvar_t cg_customCrosshairCrossOutlineRounded;
 extern vmCvar_t cg_customCrosshairCrossOutlineColor;
 extern vmCvar_t cg_customCrosshairCrossOutlineWidth;
-extern vmCvar_t cg_customCrosshairDynamicColor;
+extern vmCvar_t cg_customCrosshairHealth;
 
 extern vmCvar_t cg_scopeReticleStyle;
 extern vmCvar_t cg_scopeReticleColor;

@@ -48,6 +48,7 @@ typedef struct
 	char numberToNameTableReminder[MAXHUDS][MAX_QPATH]; //< added in version 3
 	qboolean shiftHealthBarDynamicColorStyle;           //< added in version 4
 	qboolean replaceWeaponIconStyle;                    //< added in version 5
+	qboolean addNoEchoToPopupmessageFilter;             //< added in version 5
 } hudFileUpgrades_t;
 
 static uint32_t CG_CompareHudComponents(hudStucture_t *hud, hudComponent_t *comp, hudStucture_t *parentHud, hudComponent_t *parentComp);
@@ -1035,7 +1036,7 @@ static qboolean CG_ParseHudComponent(int handle, hudComponent_t *comp)
  */
 static qboolean CG_ParseHUD(int handle)
 {
-	int           i, componentOffset = 0;
+	int           i;
 	pc_token_t    token;
 	hudStucture_t *tempHud, *hud, *parentHud = NULL;
 	qboolean      loadDefaults = qtrue;
@@ -1084,7 +1085,6 @@ static qboolean CG_ParseHUD(int handle)
 		CG_setDefaultHudValues(tempHud);
 	}
 
-	componentOffset = 0;
 	while (qtrue)
 	{
 		if (!trap_PC_ReadToken(handle, &token))
@@ -1118,7 +1118,7 @@ static qboolean CG_ParseHUD(int handle)
 					CG_CloneHudComponent(parentHud, hudComponentFields[i].name, tempHud, component);
 				}
 
-				component->offset    = componentOffset++;
+				component->offset    = i;
 				component->hardScale = hudComponentFields[i].scale;
 				component->draw      = hudComponentFields[i].draw;
 				if (!CG_ParseHudComponent(handle, component))
@@ -1331,12 +1331,14 @@ static void CG_HudParseColorObject(cJSON *object, vec_t *colorVec)
  */
 static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, qboolean isEditable)
 {
-	unsigned int   i     = 0;
-	char           *name = NULL;
-	cJSON          *tmp = NULL, *comps = NULL, *comp = NULL;
-	hudComponent_t *component;
-	hudStucture_t  *tmpHud, *parentHud = NULL, *oldHud = NULL;
-	int            componentOffset = 0;
+	unsigned int  i;
+	char          *name;
+	cJSON         *tmp;
+	cJSON         *comps;
+	hudStucture_t *tmpHud;
+	hudStucture_t *parentHud = NULL;
+	hudStucture_t *oldHud;
+
 
 	// Sanity check. Only objects should be in the huds array.
 	if (!cJSON_IsObject(hud))
@@ -1458,8 +1460,8 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 
 	for (i = 0; hudComponentFields[i].name; i++)
 	{
-		component = (hudComponent_t *) ((char *) tmpHud + hudComponentFields[i].offset);
-		comp      = cJSON_GetObjectItem(comps, hudComponentFields[i].name);
+		hudComponent_t *component = (hudComponent_t *) ((char *) tmpHud + hudComponentFields[i].offset);
+		cJSON          *comp      = cJSON_GetObjectItem(comps, hudComponentFields[i].name);
 
 		if (parentHud)
 		{
@@ -1486,7 +1488,8 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 		{
 			continue;
 		}
-		component->offset    = componentOffset++;
+
+		component->offset    = i;
 		component->hardScale = hudComponentFields[i].scale;
 		component->draw      = hudComponentFields[i].draw;
 		component->parsed    = qtrue;
@@ -1544,6 +1547,32 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 	if (upgr->replaceWeaponIconStyle)
 	{
 		CLEARBIT(tmpHud->weaponicon.style, 1);
+	}
+
+	if (upgr->addNoEchoToPopupmessageFilter)
+	{
+		int numPopUp;
+
+		// only 3 popupmessages were available
+		for (numPopUp = 0; numPopUp < 3; ++numPopUp)
+		{
+			hudComponent_t *comp = (hudComponent_t *)((byte *)&tmpHud->popupmessages + numPopUp * sizeof(hudComponent_t));
+			int            j;
+
+			for (j = 10; j > 5; --j)
+			{
+				if (CHECKBIT(comp->style, j - 1))
+				{
+					ENABLEBIT(comp->style, j);
+				}
+				else
+				{
+					CLEARBIT(comp->style, j);
+				}
+			}
+
+			CLEARBIT(comp->style, j);
+		}
 	}
 
 	if (upgr->shiftHealthBarDynamicColorStyle)
@@ -1615,7 +1644,8 @@ static void CG_CheckJsonFileUpgrades(cJSON *root, hudFileUpgrades_t *ret)
 		ret->shiftHealthBarDynamicColorStyle = qtrue;
 	// fall through
 	case 4:         // 2.84 - weapon icon dynamic health style replace by only ticking style due to split with weapon heat bar
-		ret->replaceWeaponIconStyle = qtrue;
+		ret->replaceWeaponIconStyle        = qtrue;
+		ret->addNoEchoToPopupmessageFilter = qtrue;
 		break;
 	default:
 		CG_Printf(S_COLOR_RED "ERROR CG_ReadHudJsonFile: invalid version used: %i only %i is supported\n", fileVersion, CURRENT_HUD_JSON_VERSION);

@@ -93,7 +93,6 @@ vmCvar_t cg_scopedSensitivityScaler;
 vmCvar_t cg_synchronousClients;
 #endif // ALLOW_GSYNC
 vmCvar_t cg_teamChatTime;
-vmCvar_t cg_teamChatHeight;
 vmCvar_t cg_teamChatMention;
 vmCvar_t cg_stats;
 vmCvar_t cg_buildScript;
@@ -151,6 +150,7 @@ vmCvar_t cg_autoReload;
 vmCvar_t cg_bloodDamageBlend;
 vmCvar_t cg_bloodFlash;
 vmCvar_t cg_bloodFlashTime;
+vmCvar_t cg_bloodForcePuffsForDamage;
 vmCvar_t cg_noAmmoAutoSwitch;
 vmCvar_t cg_printObjectiveInfo;
 #ifdef FEATURE_MULTIVIEW
@@ -311,7 +311,7 @@ vmCvar_t cg_customCrosshairCrossColor;
 vmCvar_t cg_customCrosshairCrossOutlineRounded;
 vmCvar_t cg_customCrosshairCrossOutlineColor;
 vmCvar_t cg_customCrosshairCrossOutlineWidth;
-vmCvar_t cg_customCrosshairDynamicColor;
+vmCvar_t cg_customCrosshairHealth;
 
 vmCvar_t cg_scopeReticleStyle;
 vmCvar_t cg_scopeReticleColor;
@@ -411,7 +411,6 @@ static cvarTable_t cvarTable[] =
 	{ &cg_thirdPerson,                        "cg_thirdPerson",                        "0",           CVAR_CHEAT,                   0 },           // per atvi req
 	{ &cg_scopedSensitivityScaler,            "cg_scopedSensitivityScaler",            "0.6",         CVAR_ARCHIVE,                 0 },           // per atvi req
 	{ &cg_teamChatTime,                       "cg_teamChatTime",                       "8000",        CVAR_ARCHIVE,                 0 },
-	{ &cg_teamChatHeight,                     "cg_teamChatHeight",                     "8",           CVAR_ARCHIVE,                 0 },
 	{ &cg_teamChatMention,                    "cg_teamChatMention",                    "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_coronafardist,                      "cg_coronafardist",                      "1536",        CVAR_ARCHIVE,                 0 },
 	{ &cg_coronas,                            "cg_coronas",                            "1",           CVAR_ARCHIVE,                 0 },
@@ -459,6 +458,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_bloodDamageBlend,                   "cg_bloodDamageBlend",                   "1.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_bloodFlash,                         "cg_bloodFlash",                         "1.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_bloodFlashTime,                     "cg_bloodFlashTime",                     "1500",        CVAR_ARCHIVE,                 0 },
+	{ &cg_bloodForcePuffsForDamage,           "cg_bloodForcePuffsForDamage",           "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_noAmmoAutoSwitch,                   "cg_noAmmoAutoSwitch",                   "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_printObjectiveInfo,                 "cg_printObjectiveInfo",                 "1",           CVAR_ARCHIVE,                 0 },
 #ifdef FEATURE_MULTIVIEW
@@ -617,7 +617,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_customCrosshairCrossOutlineRounded, "cg_customCrosshairCrossOutlineRounded", "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossOutlineColor,   "cg_customCrosshairCrossOutlineColor",   "#000000E6",   CVAR_ARCHIVE,                 0 },
 	{ &cg_customCrosshairCrossOutlineWidth,   "cg_customCrosshairCrossOutlineWidth",   "1.0",         CVAR_ARCHIVE,                 0 },
-	{ &cg_customCrosshairDynamicColor,        "cg_customCrosshairDynamicColor",        "0",           CVAR_ARCHIVE,                 0 },
+	{ &cg_customCrosshairHealth,              "cg_customCrosshairHealth",              "0",           CVAR_ARCHIVE,                 0 },
 
 	{ &cg_scopeReticleStyle,                  "cg_scopeReticleStyle",                  "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_scopeReticleColor,                  "cg_scopeReticleColor",                  "#000000FF",   CVAR_ARCHIVE,                 0 },

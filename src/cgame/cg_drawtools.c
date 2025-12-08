@@ -310,7 +310,15 @@ void CG_FilledBar(float x, float y, float w, float h, float *startColor, float *
 
 		if (needleFrac > 0.f && flags & BAR_NEEDLE)
 		{
-			CG_FillRect(x3, y3 + (h * (1 - needleFrac)) + 0.0, w, 1.0, backgroundcolor);
+			if (flags & BAR_LEFT)
+			{
+				y3 += h * (1.0f - needleFrac);
+			}
+			else
+			{
+				y3 += h * needleFrac;
+			}
+			CG_FillRect(x3, y3, w, 1.0f, backgroundcolor);
 		}
 
 		if (flags & BAR_DECOR)
@@ -368,7 +376,15 @@ void CG_FilledBar(float x, float y, float w, float h, float *startColor, float *
 
 		if (needleFrac > 0.f && flags & BAR_NEEDLE)
 		{
-			CG_FillRect(x3 + (w * (1 - needleFrac)) - 0.0, y3, 1.0, h, backgroundcolor);
+			if (flags & BAR_LEFT)
+			{
+				x3 += w * (1.0f - needleFrac);
+			}
+			else
+			{
+				x3 += w * needleFrac;
+			}
+			CG_FillRect(x3, y3, 1.0f, h, backgroundcolor);
 		}
 
 		if (flags & BAR_DECOR)
@@ -1076,31 +1092,33 @@ void CG_AddOnScreenBar(float fraction, vec4_t colorStart, vec4_t colorEnd, vec4_
  * @param[in]  textScale
  * @param[in]  font
  * @param[in]  width
- * @param[out] maxLineChars
+ * @param[out] maxChars
  */
-int CG_GetMaxCharsPerLine(const char *str, float textScale, fontHelper_t *font, float width)
+int CG_MaxCharsForWidth(const char *str, float textScale, fontHelper_t *font, float width)
 {
-	int maxLineChars = 0;
-	int limit        = 0;
+	int maxChars = 0;
+	int limit    = 0;
 
 	while (str != NULL)
 	{
-		if (CG_Text_Width_Ext_Float(str, textScale, 0, font) < width)
+		if (CG_Text_Width_Ext_Float(str, textScale, 0, font) <= width)
 		{
-			maxLineChars = Q_PrintStrlen(str);
+			maxChars = Q_PrintStrlen(str);
 			break;
 		}
 
 		limit++;
-		maxLineChars++;
+		maxChars++;
 
 		if (CG_Text_Width_Ext_Float(str, textScale, limit, font) > width)
 		{
+			// we went over the limit, so reduce 'maxChars' by 1
+			maxChars--;
 			break;
 		}
 	}
 
-	return maxLineChars;
+	return maxChars;
 }
 
 /**
