@@ -145,7 +145,7 @@ jobs:
           if-no-files-found: error
 
   osx-mod:
-    runs-on: macos-13
+    runs-on: macos-14
     needs: pre-build
     steps:
       - uses: actions/checkout@v4
@@ -541,7 +541,7 @@ jobs:
           if-no-files-found: error
 
   osx:
-    runs-on: macos-13
+    runs-on: macos-14
     needs: [pre-build, mod-merger]
     env:
       CI_ETL_DESCRIBE: ${{needs.pre-build.outputs.describe}}
@@ -612,10 +612,44 @@ jobs:
         run: dir
         working-directory: build/legacy
 
+      - name: Upload Win etl.exe
+        uses: actions/upload-artifact@v4
+        id: artifact-exe-upload-step
+        with:
+          name: win-exe
+          path: |
+            build/etl.exe
+          if-no-files-found: error
+
+      - name: SignPath Win Exe Snapshot
+        uses: signpath/github-action-submit-signing-request@v1.3
+        with:
+          api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
+          organization-id: "${{ secrets.SIGNPATH_ORGANIZATION_ID }}"
+          project-slug: "etlegacy"
+          signing-policy-slug: "test-signing"
+          github-artifact-id: "${{steps.artifact-exe-upload-step.outputs.artifact-id}}"
+          wait-for-completion: true
+          output-artifact-directory: "win-exe"
+
+      - name: SignPath Win Exe Release
+        uses: signpath/github-action-submit-signing-request@v1.3
+        if: github.ref_type == 'tag'
+        with:
+          api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
+          organization-id: "${{ secrets.SIGNPATH_ORGANIZATION_ID }}"
+          project-slug: "etlegacy"
+          signing-policy-slug: "release-signing"
+          github-artifact-id: "${{steps.artifact-exe-upload-step.outputs.artifact-id}}"
+          wait-for-completion: true
+          output-artifact-directory: "win-exe"
+
       - name: Generate packages
         shell: cmd
         working-directory: build
-        run: cpack
+        run: |
+          cp D:\a\etlegacy\etlegacy\win-exe\etl.exe .
+          cpack
 
       - uses: actions/upload-artifact@v4
         id: artifact-upload-step
@@ -653,10 +687,44 @@ jobs:
         run: dir
         working-directory: build/legacy
 
+      - name: Upload Win64 etl.exe
+        uses: actions/upload-artifact@v4
+        id: artifact-exe-upload-step
+        with:
+          name: win64-exe
+          path: |
+            build/etl.exe
+          if-no-files-found: error
+
+      - name: SignPath Win64 Exe Snapshot
+        uses: signpath/github-action-submit-signing-request@v1.3
+        with:
+          api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
+          organization-id: "${{ secrets.SIGNPATH_ORGANIZATION_ID }}"
+          project-slug: "etlegacy"
+          signing-policy-slug: "test-signing"
+          github-artifact-id: "${{steps.artifact-exe-upload-step.outputs.artifact-id}}"
+          wait-for-completion: true
+          output-artifact-directory: "win64-exe"
+
+      - name: SignPath Win64 Exe Release
+        uses: signpath/github-action-submit-signing-request@v1.3
+        if: github.ref_type == 'tag'
+        with:
+          api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
+          organization-id: "${{ secrets.SIGNPATH_ORGANIZATION_ID }}"
+          project-slug: "etlegacy"
+          signing-policy-slug: "release-signing"
+          github-artifact-id: "${{steps.artifact-exe-upload-step.outputs.artifact-id}}"
+          wait-for-completion: true
+          output-artifact-directory: "win64-exe"
+
       - name: Generate packages
         shell: cmd
         working-directory: build
-        run: cpack
+        run: |
+          cp D:\a\etlegacy\etlegacy\win64-exe\etl.exe .
+          cpack
 
       - uses: actions/upload-artifact@v4
         id: artifact-upload-step
@@ -947,6 +1015,7 @@ jobs:
             incomplete-mod-pk3
             *-packages
             *-mod
+            *-exe
 
   ci-discord-notify-on-failure:
     needs:
