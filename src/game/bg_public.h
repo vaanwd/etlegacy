@@ -1821,9 +1821,6 @@ typedef enum
 	TEAM_NUM_TEAMS
 } team_t;
 
-/// Time between location updates
-#define TEAM_LOCATION_UPDATE_TIME       1000
-
 /**
  * @enum extWeaponStats_e
  * @typedef extWeaponStats_t
@@ -3045,6 +3042,7 @@ typedef enum popupMessageType_e
 	PM_CONNECT,
 	PM_DEATH_HEADSHOT,
 	PM_ANNOUNCE,
+	PM_DISCONNECT,
 	PM_NUM_TYPES
 } popupMessageType_t;
 

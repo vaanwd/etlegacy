@@ -239,14 +239,6 @@ extern vmCvar_t cg_sharetimerText;
 extern vmCvar_t cg_automapZoom;
 extern vmCvar_t cg_autoCmd;
 
-extern vmCvar_t cg_popupFadeTime;
-extern vmCvar_t cg_popupStayTime;
-extern vmCvar_t cg_popupTime;
-
-extern vmCvar_t cg_popupXPGainFadeTime;
-extern vmCvar_t cg_popupXPGainStayTime;
-extern vmCvar_t cg_popupXPGainTime;
-
 extern vmCvar_t cg_fontScaleSP;
 
 // unlagged optimized prediction
@@ -266,6 +258,8 @@ extern vmCvar_t cg_bannerTime;
 
 extern vmCvar_t cg_shoutcastTeamNameRed;
 extern vmCvar_t cg_shoutcastTeamNameBlue;
+extern vmCvar_t cg_shoutcastTeamScoreRed;
+extern vmCvar_t cg_shoutcastTeamScoreBlue;
 extern vmCvar_t cg_shoutcastDrawHealth;
 extern vmCvar_t cg_shoutcastGrenadeTrail;
 

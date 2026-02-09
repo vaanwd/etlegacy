@@ -2220,7 +2220,14 @@ char *ClientConnect(int clientNum, qboolean firstTime, qboolean isBot)
 
 				if (!Q_strncmp(cl->pers.cl_guid, cs_guid, MAX_GUID_LENGTH + 1))
 				{
-					return "Bad GUID: Duplicate etkey.";
+					if ((g_xpSaver.integer & XPSF_WIPE_DUP_GUID))
+					{
+						trap_DropClient(clientNum, "Bad GUID: Duplicate etkey.", 0);
+					}
+					else
+					{
+						return "Bad GUID: Duplicate etkey.";
+					}
 				}
 			}
 		}
@@ -2477,7 +2484,32 @@ char *ClientConnect(int clientNum, qboolean firstTime, qboolean isBot)
 	}
 #endif
 
-	if (firstTime && g_xpSaver.integer && g_gametype.integer == GT_WOLF_CAMPAIGN)
+	if (
+		firstTime &&
+		(g_xpSaver.integer & XPSF_ENABLE) && (
+			(g_gametype.integer == GT_WOLF_CAMPAIGN) ||
+			(g_gametype.integer == GT_WOLF_STOPWATCH && !(g_xpSaver.integer & XPSF_DISABLE_STOPWATCH)) ||
+			(g_gametype.integer == GT_WOLF_MAPVOTE || g_gametype.integer == GT_WOLF)
+			)
+		)
+	{
+		G_XPSaver_Load(client);
+
+		for (i = 0; i < SK_NUM_SKILLS; i++)
+		{
+			G_SetPlayerSkill(client, i);
+		}
+	}
+
+	if (
+		!firstTime &&
+		(g_xpSaver.integer & XPSF_ENABLE) && (
+			(g_gametype.integer == GT_WOLF_CAMPAIGN) ||
+			((g_gametype.integer == GT_WOLF_STOPWATCH) && !(g_xpSaver.integer & XPSF_DISABLE_STOPWATCH)) ||
+			(g_gametype.integer == GT_WOLF_MAPVOTE) ||
+			(g_gametype.integer == GT_WOLF)
+			)
+		)
 	{
 		G_XPSaver_Load(client);
 
@@ -2495,11 +2527,11 @@ char *ClientConnect(int clientNum, qboolean firstTime, qboolean isBot)
 	{
 		if ((g_countryflags.integer & CF_CONNECT) && client->sess.uci > 0 && client->sess.uci < MAX_COUNTRY_NUM && allowGeoIP)
 		{
-			trap_SendServerCommand(-1, va("cpm \"" S_COLOR_WHITE "%s" S_COLOR_WHITE " connected from %s\n\"", client->pers.netname, country_name[client->sess.uci]));
+			trap_SendServerCommand(-1, va("cpm \"" S_COLOR_WHITE "%s" S_COLOR_WHITE " connected from %s\n\" %i", client->pers.netname, country_name[client->sess.uci], PM_CONNECT));
 		}
 		else
 		{
-			trap_SendServerCommand(-1, va("cpm \"" S_COLOR_WHITE "%s" S_COLOR_WHITE " connected\n\"", client->pers.netname));
+			trap_SendServerCommand(-1, va("cpm \"" S_COLOR_WHITE "%s" S_COLOR_WHITE " connected\n\" %i", client->pers.netname, PM_CONNECT));
 		}
 	}
 
@@ -3424,7 +3456,15 @@ void ClientDisconnect(int clientNum)
 	}
 #endif
 
-	if (g_xpSaver.integer && g_gametype.integer == GT_WOLF_CAMPAIGN && !level.intermissiontime)
+	if (
+		(g_xpSaver.integer & XPSF_ENABLE) &&
+		!level.intermissiontime && (
+			(g_gametype.integer == GT_WOLF_CAMPAIGN) ||
+			((g_gametype.integer == GT_WOLF_STOPWATCH) && !(g_xpSaver.integer & XPSF_DISABLE_STOPWATCH)) ||
+			(g_gametype.integer == GT_WOLF_MAPVOTE) ||
+			(g_gametype.integer == GT_WOLF)
+			)
+		)
 	{
 		G_XPSaver_Store(ent->client);
 	}

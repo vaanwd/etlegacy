@@ -240,10 +240,6 @@ vmCvar_t cg_simpleItemsScale;
 vmCvar_t cg_automapZoom;
 vmCvar_t cg_autoCmd;
 
-vmCvar_t cg_popupFadeTime;
-vmCvar_t cg_popupStayTime;
-vmCvar_t cg_popupTime;
-
 vmCvar_t cg_popupXPGainFadeTime;
 vmCvar_t cg_popupXPGainStayTime;
 vmCvar_t cg_popupXPGainTime;
@@ -269,6 +265,8 @@ vmCvar_t cg_bannerTime;
 
 vmCvar_t cg_shoutcastTeamNameRed;
 vmCvar_t cg_shoutcastTeamNameBlue;
+vmCvar_t cg_shoutcastTeamScoreRed;
+vmCvar_t cg_shoutcastTeamScoreBlue;
 vmCvar_t cg_shoutcastDrawHealth;
 vmCvar_t cg_shoutcastGrenadeTrail;
 
@@ -548,12 +546,6 @@ static cvarTable_t cvarTable[] =
 	{ &cg_simpleItemsScale,                   "cg_simpleItemsScale",                   "1.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_automapZoom,                        "cg_automapZoom",                        "5.159",       CVAR_ARCHIVE,                 0 },
 	{ &cg_autoCmd,                            "cg_autoCmd",                            "",            CVAR_TEMP,                    0 },
-	{ &cg_popupFadeTime,                      "cg_popupFadeTime",                      "2500",        CVAR_ARCHIVE,                 0 },
-	{ &cg_popupStayTime,                      "cg_popupStayTime",                      "2000",        CVAR_ARCHIVE,                 0 },
-	{ &cg_popupTime,                          "cg_popupTime",                          "0",           CVAR_ARCHIVE,                 0 },
-	{ &cg_popupXPGainFadeTime,                "cg_popupXPGainFadeTime",                "250",         CVAR_ARCHIVE,                 0 },
-	{ &cg_popupXPGainStayTime,                "cg_popupXPGainStayTime",                "1000",        CVAR_ARCHIVE,                 0 },
-	{ &cg_popupXPGainTime,                    "cg_popupXPGainTime",                    "200",         CVAR_ARCHIVE,                 0 },
 	{ &cg_weapaltReloads,                     "cg_weapaltReloads",                     "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_weapaltSwitches,                    "cg_weapaltSwitches",                    "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_weapaltMgAutoProne,                 "cg_weapaltMgAutoProne",                 "1",           CVAR_ARCHIVE,                 0 },
@@ -577,6 +569,8 @@ static cvarTable_t cvarTable[] =
 
 	{ &cg_shoutcastTeamNameRed,               "cg_shoutcastTeamNameRed",               "Axis",        CVAR_ARCHIVE,                 0 },
 	{ &cg_shoutcastTeamNameBlue,              "cg_shoutcastTeamNameBlue",              "Allies",      CVAR_ARCHIVE,                 0 },
+	{ &cg_shoutcastTeamScoreRed,              "cg_shoutcastTeamScoreRed",              "0",           CVAR_ARCHIVE,                 0 },
+	{ &cg_shoutcastTeamScoreBlue,             "cg_shoutcastTeamScoreBlue",             "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_shoutcastDrawHealth,                "cg_shoutcastDrawHealth",                "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_shoutcastGrenadeTrail,              "cg_shoutcastGrenadeTrail",              "0",           CVAR_ARCHIVE,                 0 },
 
@@ -630,6 +624,11 @@ static const unsigned int cvarTableSize = sizeof(cvarTable) / sizeof(cvarTable[0
 static qboolean           cvarsLoaded   = qfalse;
 void CG_setClientFlags(void);
 
+/**
+ * @brief CG_RegisterOrUpdateCvars
+ * @param[in] cv
+ * @return
+ */
 static qboolean CG_RegisterOrUpdateCvars(cvarTable_t *cv)
 {
 	if (cv->vmCvar == &cg_customCrosshairDotColor)

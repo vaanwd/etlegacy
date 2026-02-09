@@ -49,6 +49,8 @@ typedef struct
 	qboolean shiftHealthBarDynamicColorStyle;           //< added in version 4
 	qboolean replaceWeaponIconStyle;                    //< added in version 5
 	qboolean addNoEchoToPopupmessageFilter;             //< added in version 5
+	qboolean shiftHealthBarDynamicColorStyle2;          //< added in version 6
+	qboolean moveBarStyleIntoOwnField;                 //< added in version 7
 } hudFileUpgrades_t;
 
 static uint32_t CG_CompareHudComponents(hudStucture_t *hud, hudComponent_t *comp, hudStucture_t *parentHud, hudComponent_t *parentComp);
@@ -528,6 +530,46 @@ static cJSON *CG_CreateHudObject(hudStucture_t *hud)
 			cJSON_AddNumberToObject(compObj, "autoAdjust", comp->autoAdjust);
 		}
 
+		if (flags & BIT(13))
+		{
+			cJSON_AddNumberToObject(compObj, "barStyle", comp->barStyle);
+		}
+
+		if (flags & BIT(14))
+		{
+			cJSON_AddNumberToObject(compObj, "circleDensityPoint", comp->circleDensityPoint);
+		}
+
+		if (flags & BIT(15))
+		{
+			cJSON_AddNumberToObject(compObj, "circleStartAngle", comp->circleStartAngle);
+		}
+
+		if (flags & BIT(16))
+		{
+			cJSON_AddNumberToObject(compObj, "circleEndAngle", comp->circleEndAngle);
+		}
+
+		if (flags & BIT(17))
+		{
+			cJSON_AddNumberToObject(compObj, "circleThickness", comp->circleThickness);
+		}
+
+		if (flags & BIT(18))
+		{
+			cJSON_AddNumberToObject(compObj, "feedTime", comp->feedTime);
+		}
+
+		if (flags & BIT(19))
+		{
+			cJSON_AddNumberToObject(compObj, "feedStayTime", comp->feedStayTime);
+		}
+
+		if (flags & BIT(20))
+		{
+			cJSON_AddNumberToObject(compObj, "feedFadeTime", comp->feedFadeTime);
+		}
+
 		if (flags & BIT(0))
 		{
 			cJSON_AddNumberToObject(compObj, "anchor", comp->anchorPoint);
@@ -637,6 +679,46 @@ static uint32_t CG_CompareHudComponents(hudStucture_t *hud, hudComponent_t *comp
 	if (comp->autoAdjust != parentComp->autoAdjust)
 	{
 		flags |= BIT(12);
+	}
+
+	if (comp->barStyle != parentComp->barStyle)
+	{
+		flags |= BIT(13);
+	}
+
+	if (comp->circleDensityPoint != parentComp->circleDensityPoint)
+	{
+		flags |= BIT(14);
+	}
+
+	if (comp->circleStartAngle != parentComp->circleStartAngle)
+	{
+		flags |= BIT(15);
+	}
+
+	if (comp->circleEndAngle != parentComp->circleEndAngle)
+	{
+		flags |= BIT(16);
+	}
+
+	if (comp->circleThickness != parentComp->circleThickness)
+	{
+		flags |= BIT(17);
+	}
+
+	if (comp->feedTime != parentComp->feedTime)
+	{
+		flags |= BIT(18);
+	}
+
+	if (comp->feedStayTime != parentComp->feedStayTime)
+	{
+		flags |= BIT(19);
+	}
+
+	if (comp->feedFadeTime != parentComp->feedFadeTime)
+	{
+		flags |= BIT(20);
 	}
 
 	return flags;
@@ -1523,6 +1605,16 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 		component->alignText  = Q_ReadIntValueJsonEx(comp, "textAlign", component->alignText);
 		component->autoAdjust = Q_ReadIntValueJsonEx(comp, "autoAdjust", component->autoAdjust);
 
+		component->barStyle           = Q_ReadIntValueJsonEx(comp, "barStyle", component->barStyle);
+		component->circleDensityPoint = Q_ReadFloatValueJsonEx(comp, "circleDensityPoint", component->circleDensityPoint);
+		component->circleStartAngle   = Q_ReadFloatValueJsonEx(comp, "circleStartAngle", component->circleStartAngle);
+		component->circleEndAngle     = Q_ReadFloatValueJsonEx(comp, "circleEndAngle", component->circleEndAngle);
+		component->circleThickness    = Q_ReadFloatValueJsonEx(comp, "circleThickness", component->circleThickness);
+
+		component->feedTime     = Q_ReadFloatValueJsonEx(comp, "feedTime", component->feedTime);
+		component->feedStayTime = Q_ReadFloatValueJsonEx(comp, "feedStayTime", component->feedStayTime);
+		component->feedFadeTime = Q_ReadFloatValueJsonEx(comp, "feedFadeTime", component->feedFadeTime);
+
 		component->anchorPoint = Q_ReadIntValueJsonEx(comp, "anchor", component->anchorPoint);
 		tmp                    = cJSON_GetObjectItem(comp, "parent");
 		if (tmp)
@@ -1588,6 +1680,89 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 		}
 	}
 
+	if (upgr->shiftHealthBarDynamicColorStyle2)
+	{
+		// Ensure dynamic coloration style is applied due to insertion of needle style from bar
+		if (tmpHud->crosshairbar.style & BAR_CIRCULAR)
+		{
+			tmpHud->healthbar.style |= (BAR_CIRCULAR << 1);
+		}
+
+		tmpHud->healthbar.style &= ~BAR_CIRCULAR;    // by default, circular bar will be desactivate
+
+		// Ensure dynamic coloration style is applied due to insertion of circular style from bar
+		if (tmpHud->healthbar.style & BAR_CIRCULAR)
+		{
+			tmpHud->healthbar.style |= (BAR_CIRCULAR << 1);
+		}
+
+		tmpHud->healthbar.style &= ~BAR_CIRCULAR;    // by default, circular bar will be desactivate
+	}
+
+	if (upgr->moveBarStyleIntoOwnField)
+	{
+		int tmp = 0;
+
+		if (!parentHud || (tmpHud->staminabar.style != parentHud->staminabar.style))
+		{
+			tmpHud->staminabar.barStyle = tmpHud->staminabar.style;
+			tmpHud->staminabar.style    = 0;    // clear all
+		}
+
+		if (!parentHud || (tmpHud->breathbar.style != parentHud->breathbar.style))
+		{
+			tmpHud->breathbar.barStyle = tmpHud->breathbar.style;
+			tmpHud->breathbar.style    = 0; // clear all
+		}
+
+		if (!parentHud || (tmpHud->weaponheatbar.style != parentHud->weaponheatbar.style))
+		{
+			tmpHud->weaponheatbar.barStyle = tmpHud->weaponheatbar.style;
+			tmpHud->weaponheatbar.style    = 0; // clear all
+		}
+
+		if (!parentHud || (tmpHud->weaponchargebar.style != parentHud->weaponchargebar.style))
+		{
+			tmpHud->weaponchargebar.barStyle = tmpHud->weaponchargebar.style;
+			tmpHud->weaponchargebar.style    = 0;   // clear all
+		}
+
+		if (!parentHud || (tmpHud->cursorhintsbar.style != parentHud->cursorhintsbar.style))
+		{
+			tmpHud->cursorhintsbar.barStyle = tmpHud->healthbar.style;
+			tmpHud->cursorhintsbar.style    = 0;    // clear all
+		}
+
+		if (!parentHud || (tmpHud->healthbar.style != parentHud->healthbar.style))
+		{
+			tmpHud->healthbar.barStyle  = tmpHud->healthbar.style;
+			tmpHud->healthbar.barStyle &= ~(BAR_CIRCULAR << 1);   // remove dynamic coloration style from bar style
+			tmpHud->healthbar.style     = tmpHud->healthbar.style & (BAR_CIRCULAR << 1); // keep dynamic coloration style only
+		}
+
+		if (!parentHud || (tmpHud->weaponstability.style != parentHud->weaponstability.style))
+		{
+			tmpHud->weaponstability.barStyle = (tmpHud->weaponstability.style >> 1); // remove "Always" style from bar style
+			tmpHud->weaponstability.style    = tmpHud->weaponstability.style & 1; // keep "Always" style only
+		}
+
+		if (!parentHud || (tmpHud->crosshairbar.style != parentHud->crosshairbar.style))
+		{
+			tmpHud->crosshairbar.barStyle  = (tmpHud->crosshairbar.style >> 3);  // remove "Class", "Rank", "Prestige" style from bar style
+			tmpHud->crosshairbar.barStyle &= ~(BAR_CIRCULAR << 1);   // remove dynamic coloration style from bar style
+
+			// retrived common style for crosshair bar
+			tmp |= (tmpHud->crosshairbar.style & CROSSHAIR_BAR_CLASS);
+			tmp |= (tmpHud->crosshairbar.style & CROSSHAIR_BAR_RANK);
+			tmp |= (tmpHud->crosshairbar.style & CROSSHAIR_BAR_PRESTIGE);
+			if (tmpHud->healthbar.style & (BAR_CIRCULAR << 1))
+			{
+				tmp |= CROSSHAIR_BAR_DYNAMIC_COLOR;
+			}
+			tmpHud->crosshairbar.style = tmp;
+		}
+	}
+
 	if (upgr->calcAnchors)
 	{
 		CG_GenerateHudAnchors(tmpHud);
@@ -1646,6 +1821,12 @@ static void CG_CheckJsonFileUpgrades(cJSON *root, hudFileUpgrades_t *ret)
 	case 4:         // 2.84 - weapon icon dynamic health style replace by only ticking style due to split with weapon heat bar
 		ret->replaceWeaponIconStyle        = qtrue;
 		ret->addNoEchoToPopupmessageFilter = qtrue;
+	// fall through
+	case 5:         // 2.84 - circular style has been added for bar, requiring shifting Dynamic Color style value
+		ret->shiftHealthBarDynamicColorStyle2 = qtrue;
+	// fall through
+	case 6:         // 2.84 - move all bar style into his own field varible to be separated from real style option
+		ret->moveBarStyleIntoOwnField = qtrue;
 		break;
 	default:
 		CG_Printf(S_COLOR_RED "ERROR CG_ReadHudJsonFile: invalid version used: %i only %i is supported\n", fileVersion, CURRENT_HUD_JSON_VERSION);

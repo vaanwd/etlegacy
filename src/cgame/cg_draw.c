@@ -1112,6 +1112,10 @@ void CG_DrawTeamInfo(hudComponent_t *comp)
 				{
 					flag = cgs.media.alliedFlag;
 				}
+				else if (cgs.teamChatMsgTeams[i % chatHeight] == TEAM_SPECTATOR)
+				{
+					flag = cgs.media.pmImageSpecFlag;
+				}
 				else
 				{
 					flag = 0;
@@ -1876,6 +1880,8 @@ void CG_DrawCrosshair(hudComponent_t *comp)
 	x = comp->location.x + (comp->location.w - w) * .5f;
 	y = comp->location.y + (comp->location.h - h) * .5f;
 
+	trap_R_SetColor(colorWhite);
+
 	CG_AdjustFrom640(&x, &y, &w, &h);
 
 	// set color based on health
@@ -2199,7 +2205,7 @@ void CG_DrawCrosshairHealthBar(hudComponent_t *comp)
 	int    health, maxHealth;
 	int    clientNum, class;
 	float  x = comp->location.x, w = comp->location.w;
-	int    style;
+	int    style = comp->barStyle;
 
 	// world-entity or no-entity
 	if (cg.crosshairEntNum >= ENTITYNUM_WORLD)
@@ -2321,10 +2327,7 @@ void CG_DrawCrosshairHealthBar(hudComponent_t *comp)
 		maxHealth = CG_GetPlayerMaxHealth(cg.crosshairEntNum, cgs.clientinfo[cg.crosshairEntNum].cls, cgs.clientinfo[cg.crosshairEntNum].team);
 	}
 
-	// remove unecessary style for bar customization
-	style = (comp->style >> 3);
-
-	if (style & (BAR_ICON << 1))
+	if (comp->style & CROSSHAIR_BAR_DYNAMIC_COLOR)
 	{
 		Vector4Copy(comp->colorMain, c);
 		CG_ColorForHealth(health, c);
@@ -2355,8 +2358,17 @@ void CG_DrawCrosshairHealthBar(hudComponent_t *comp)
 		CG_DrawRect_FixedBorder(comp->location.x, comp->location.y, comp->location.w, comp->location.h, 1, bdcolor);
 	}
 
-	CG_FilledBar(x, comp->location.y, w, comp->location.h, (style & BAR_LERP_COLOR) ? c2 : c, (style & BAR_LERP_COLOR) ? c : NULL, bgcolor, bdcolor,
-	             Com_Clamp(0, 1.f, health / (float)maxHealth), 0.f, style, -1);
+	if (style & BAR_CIRCULAR)
+	{
+		CG_DrawCircle(x, comp->location.y, w, comp->location.h, (style & BAR_LERP_COLOR) ? c2 : c, (style & BAR_LERP_COLOR) ? c : NULL, bgcolor, bdcolor,
+		              Com_Clamp(0, 1.f, health / (float)maxHealth), 0.f, style, -1,
+		              comp->circleDensityPoint, comp->circleStartAngle, comp->circleEndAngle, comp->circleThickness);
+	}
+	else
+	{
+		CG_FilledBar(x, comp->location.y, w, comp->location.h, (style & BAR_LERP_COLOR) ? c2 : c, (style & BAR_LERP_COLOR) ? c : NULL, bgcolor, bdcolor,
+		             Com_Clamp(0, 1.f, health / (float)maxHealth), 0.f, style, -1);
+	}
 
 	trap_R_SetColor(NULL);
 }
@@ -3119,6 +3131,7 @@ void CG_DrawLimboMessage(hudComponent_t *comp)
  */
 void CG_DrawFollow(hudComponent_t *comp)
 {
+	float x = comp->location.x;
 	float y = comp->location.y;
 	float lineHeight;
 	float charHeight;
@@ -3160,6 +3173,16 @@ void CG_DrawFollow(hudComponent_t *comp)
 	heightTextOffset  = (lineHeight + charHeight) * 0.5f;
 	heightIconsOffset = (lineHeight - iconsSize) * 0.5f;
 
+	if (comp->showBackGround)
+	{
+		CG_FillRect(comp->location.x, comp->location.y, comp->location.w, comp->location.h, comp->colorBackground);
+	}
+
+	if (comp->showBorder)
+	{
+		CG_DrawRect_FixedBorder(comp->location.x, comp->location.y, comp->location.w, comp->location.h, 1, comp->colorBorder);
+	}
+
 	// Spectators view teamflags
 	if (cg.snap->ps.clientNum != cg.clientNum && cgs.clientinfo[cg.clientNum].team == TEAM_SPECTATOR)
 	{
@@ -3181,16 +3204,6 @@ void CG_DrawFollow(hudComponent_t *comp)
 	if (cg.snap->ps.pm_flags & PMF_LIMBO)
 	{
 		char deploytime[128] = { 0 };
-
-		if (comp->showBackGround)
-		{
-			CG_FillRect(comp->location.x, comp->location.y, comp->location.w, comp->location.h, comp->colorBackground);
-		}
-
-		if (comp->showBorder)
-		{
-			CG_DrawRect_FixedBorder(comp->location.x, comp->location.y, comp->location.w, comp->location.h, 1, comp->colorBorder);
-		}
 
 		if (cgs.gametype != GT_WOLF_LMS && !(comp->style & FOLLOW_NO_COUNTDOWN))
 		{
@@ -3230,8 +3243,24 @@ void CG_DrawFollow(hudComponent_t *comp)
 				}
 			}
 
-			CG_Text_Paint_Ext(comp->location.x, y + heightTextOffset, scale, scale, comp->colorMain, deploytime, 0, 0, comp->styleText, &cgs.media.limboFont2);
+			if (comp->alignText != ITEM_ALIGN_LEFT)
+			{
+				// offset x position by calculting the total length width required to display text
+				float totalLengthOffset = comp->location.w - (CG_Text_Width_Ext(deploytime, scale, 0, &cgs.media.limboFont2));
+
+				if (comp->alignText == ITEM_ALIGN_RIGHT)
+				{
+					x += totalLengthOffset;
+				}
+				else
+				{
+					x += totalLengthOffset * 0.5f;
+				}
+			}
+
+			CG_Text_Paint_Ext(x, y + heightTextOffset, scale, scale, comp->colorMain, deploytime, 0, 0, comp->styleText, &cgs.media.limboFont2);
 			y += lineHeight;
+			x  = comp->location.x;
 		}
 
 		// Don't display if you're following yourself
@@ -3242,44 +3271,69 @@ void CG_DrawFollow(hudComponent_t *comp)
 			int        charWidth  = CG_Text_Width_Ext("A", scale, 0, &cgs.media.limboFont2);
 			int        startClass = CG_Text_Width_Ext(va("(%s", follow), scale, 0, &cgs.media.limboFont2) + charWidth;
 			int        startRank  = CG_Text_Width_Ext(w, scale, 0, &cgs.media.limboFont2) + lineHeight + 2 + 2 * charWidth;
-			int        endRank;
+			int        endRank    = cgs.clientinfo[cg.snap->ps.clientNum].rank > 0 ? lineHeight + 2 : -charWidth;
 
-			CG_DrawPic(comp->location.x + startClass, y + heightIconsOffset, iconsSize, iconsSize, cgs.media.skillPics[SkillNumForClass(cgs.clientinfo[cg.snap->ps.clientNum].cls)]);
+			if (comp->alignText != ITEM_ALIGN_LEFT)
+			{
+				// offset x position by calculting the total length width required to display text
+				float totalLengthOffset = comp->location.w - (startClass + startRank + endRank + CG_Text_Width_Ext(")", scale, 0, &cgs.media.limboFont2));
+
+				if (comp->alignText == ITEM_ALIGN_RIGHT)
+				{
+					x += totalLengthOffset;
+				}
+				else
+				{
+					x += totalLengthOffset * 0.5f;
+				}
+			}
+
+			CG_DrawPic(x + startClass, y + heightIconsOffset, iconsSize, iconsSize, cgs.media.skillPics[SkillNumForClass(cgs.clientinfo[cg.snap->ps.clientNum].cls)]);
 
 			if (cgs.clientinfo[cg.snap->ps.clientNum].rank > 0)
 			{
-				CG_DrawPic(comp->location.x + startClass + startRank, y + heightIconsOffset, iconsSize, iconsSize, rankicons[cgs.clientinfo[cg.snap->ps.clientNum].rank][cgs.clientinfo[cg.snap->ps.clientNum].team == TEAM_AXIS ? 1 : 0][0].shader);
-				endRank = lineHeight + 2;
-			}
-			else
-			{
-				endRank = -charWidth;
+				CG_DrawPic(x + startClass + startRank, y + heightIconsOffset, iconsSize, iconsSize, rankicons[cgs.clientinfo[cg.snap->ps.clientNum].rank][cgs.clientinfo[cg.snap->ps.clientNum].team == TEAM_AXIS ? 1 : 0][0].shader);
 			}
 
-			CG_Text_Paint_Ext(comp->location.x, y + heightTextOffset, scale, scale, comp->colorMain, va("(%s", follow), 0, 0, comp->styleText, &cgs.media.limboFont2);
-			CG_Text_Paint_Ext(comp->location.x + startClass + lineHeight + 2 + charWidth, y + heightTextOffset, scale, scale, colorWhite, w, 0, 0, comp->styleText, &cgs.media.limboFont2);
-			CG_Text_Paint_Ext(comp->location.x + startClass + startRank + endRank, y + heightTextOffset, scale, scale, colorWhite, ")", 0, 0, comp->styleText, &cgs.media.limboFont2);
+			CG_Text_Paint_Ext(x, y + heightTextOffset, scale, scale, comp->colorMain, va("(%s", follow), 0, 0, comp->styleText, &cgs.media.limboFont2);
+			CG_Text_Paint_Ext(x + startClass + lineHeight + 2 + charWidth, y + heightTextOffset, scale, scale, colorWhite, w, 0, 0, comp->styleText, &cgs.media.limboFont2);
+			CG_Text_Paint_Ext(x + startClass + startRank + endRank, y + heightTextOffset, scale, scale, colorWhite, ")", 0, 0, comp->styleText, &cgs.media.limboFont2);
 		}
 	}
 	else
 	{
-		const char *follow    = CG_TranslateString("Following");
-		char       *w         = cgs.clientinfo[cg.snap->ps.clientNum].name;
-		int        charWidth  = CG_Text_Width_Ext("A", scale, 0, &cgs.media.limboFont2);
-		int        startClass = CG_Text_Width_Ext(follow, scale, 0, &cgs.media.limboFont2) + charWidth;
+		const char *follow     = CG_TranslateString("Following");
+		char       *clientName = cgs.clientinfo[cg.snap->ps.clientNum].name;
+		int        charWidth   = CG_Text_Width_Ext("A", scale, 0, &cgs.media.limboFont2);
+		int        startClass  = CG_Text_Width_Ext(follow, scale, 0, &cgs.media.limboFont2) + charWidth;
 
-		CG_DrawPic(comp->location.x + startClass, y + heightIconsOffset, iconsSize, iconsSize, cgs.media.skillPics[SkillNumForClass(cgs.clientinfo[cg.snap->ps.clientNum].cls)]);
+		if (comp->alignText != ITEM_ALIGN_LEFT)
+		{
+			// offset x position by calculting the total length width required to display text + icon
+			float totalLengthOffset = comp->location.w - (startClass + iconsSize + charWidth + CG_Text_Width_Ext(clientName, scale, 0, &cgs.media.limboFont2));
+
+			if (comp->alignText == ITEM_ALIGN_RIGHT)
+			{
+				x += totalLengthOffset;
+			}
+			else
+			{
+				x += totalLengthOffset * 0.5f;
+			}
+		}
+
+		CG_DrawPic(x + startClass, y + heightIconsOffset, iconsSize, iconsSize, cgs.media.skillPics[SkillNumForClass(cgs.clientinfo[cg.snap->ps.clientNum].cls)]);
 
 		if (cgs.clientinfo[cg.snap->ps.clientNum].rank > 0)
 		{
 			int startRank;
 
-			startRank = CG_Text_Width_Ext(w, scale, 0, &cgs.media.limboFont2) + iconsSize + charWidth;
-			CG_DrawPic(comp->location.x + startClass + startRank, y + heightIconsOffset, iconsSize, iconsSize, rankicons[cgs.clientinfo[cg.snap->ps.clientNum].rank][cgs.clientinfo[cg.snap->ps.clientNum].team == TEAM_AXIS ? 1 : 0][0].shader);
+			startRank = CG_Text_Width_Ext(clientName, scale, 0, &cgs.media.limboFont2) + iconsSize + charWidth;
+			CG_DrawPic(x + startClass + startRank, y + heightIconsOffset, iconsSize, iconsSize, rankicons[cgs.clientinfo[cg.snap->ps.clientNum].rank][cgs.clientinfo[cg.snap->ps.clientNum].team == TEAM_AXIS ? 1 : 0][0].shader);
 		}
 
-		CG_Text_Paint_Ext(comp->location.x, y + heightTextOffset, scale, scale, comp->colorMain, follow, 0, 0, comp->styleText, &cgs.media.limboFont2);
-		CG_Text_Paint_Ext(comp->location.x + startClass + iconsSize + charWidth, y + heightTextOffset, scale, scale, colorWhite, w, 0, 0, comp->styleText, &cgs.media.limboFont2);
+		CG_Text_Paint_Ext(x, y + heightTextOffset, scale, scale, comp->colorMain, follow, 0, 0, comp->styleText, &cgs.media.limboFont2);
+		CG_Text_Paint_Ext(x + startClass + iconsSize + charWidth, y + heightTextOffset, scale, scale, colorWhite, clientName, 0, 0, comp->styleText, &cgs.media.limboFont2);
 	}
 }
 

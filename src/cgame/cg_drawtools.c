@@ -170,8 +170,6 @@ void CG_SetChargebarIconColor(void)
 	}
 }
 
-#define BAR_BORDERSIZE 2
-
 /**
  * @brief CG_FilledBar
  * @param[in] x
@@ -191,14 +189,7 @@ void CG_FilledBar(float x, float y, float w, float h, float *startColor, float *
 	float  x2 = x, x3 = x, y2 = y, y3 = y, w2 = w, h2 = h;
 	float  iconW, iconH;
 
-	if (frac > 1)
-	{
-		frac = 1.f;
-	}
-	if (frac < 0)
-	{
-		frac = 0;
-	}
+	frac = Com_Clamp(0, 1.f, frac);
 
 	if ((flags & BAR_BG) && bgColor)       // BAR_BG set, and color specified, use specified bg color
 	{
@@ -415,6 +406,121 @@ void CG_FilledBar(float x, float y, float w, float h, float *startColor, float *
 			}
 		}
 	}
+}
+
+#define WHITE_SHADER_SIZE_COEFF 3.2f
+/**
+ * @brief CG_DrawCircle
+ * @param[in] x
+ * @param[in] y
+ * @param[in] w
+ * @param[in] h
+ * @param[in] startColor
+ * @param[in] endColor
+ * @param[in] bgColor
+ * @param[in] bdColor
+ * @param[in] frac
+ * @param[in] needleFrac
+ * @param[in] flags
+ * @param[in] icon
+ * @param[in] density
+ * @param[in] start
+ * @param[in] end
+ * @param[in] thickness
+ */
+void CG_DrawCircle(float x, float y, float w, float h, float *startColor, float *endColor,
+                   const float *bgColor, const float *bdColor, float frac, float needleFrac, int flags, qhandle_t icon,
+                   float density, float start, float end, float thickness)
+{
+	int    i;
+	vec4_t colorAtPos;
+	float  startAngle;
+	float  numberOfSquare;
+	float  size;
+	float  slice;
+	float  iconX;
+	float  iconY;
+	float  iconW;
+	float  iconH;
+
+	// ensure density and tickness are valid
+	// otherwise div by 0 will happen
+	if (!density || !thickness)
+	{
+		return;
+	}
+
+	// start at 0°
+	// BAR_LEFT mirror the circle
+	startAngle     = M_PI_2 + DEG2RAD((flags & BAR_LEFT) ? start : 360 - start);
+	numberOfSquare = ((MAX(w, h) * 2) * (1 / thickness)) * density;
+	size           = WHITE_SHADER_SIZE_COEFF / (1 / thickness);
+	slice          = ((M_TAU_F - DEG2RAD(360 - end)) / numberOfSquare) * ((flags & BAR_VERT) ? 1 : -1);     // BAR_VERT control circle direction
+
+	// adjust circle position and size to ensure it doesn't go out of bound
+	x += w * .5f;
+	y += h * .5f;
+	w *= 0.5f;
+	h *= 0.5f;
+
+	// save the original size variables for icon drawing,
+	// we don't want the circle drawing affecting the icon drawing
+	iconX = x;
+	iconY = y;
+	iconW = w;
+	iconH = iconW;
+
+	x -= size * 0.5f;
+	y -= size * 0.5f;
+	w -= size * 0.5f;
+	h -= size * 0.5f;
+
+	frac = Com_Clamp(0, 1.f, frac);
+
+	Vector4Scale(startColor, frac, colorAtPos);
+
+	// draw each point of the circles
+	for (i = 0; i <= numberOfSquare * frac; ++i)
+	{
+		// start at 0°
+		float theta = (slice * i - startAngle);
+
+		if ((flags & BAR_LERP_COLOR) && endColor)
+		{
+			Vector4Average(startColor, endColor, i / numberOfSquare, colorAtPos);
+		}
+
+		if (flags & BAR_BORDER)
+		{
+			trap_R_SetColor(bdColor);
+			CG_DrawRotatedPic(x + w * cosf(theta) + 0.5f, y + h * sinf(theta) + 0.5f, size, size, cgs.media.whiteShader, (theta + M_PI_4) / M_TAU_F);
+		}
+
+		trap_R_SetColor(colorAtPos);
+		CG_DrawRotatedPic(x + w * cosf(theta), y + h * sinf(theta), size, size, cgs.media.whiteShader, (theta + M_PI_4) / M_TAU_F);
+	}
+
+	// handle icon draw in the circle center
+	if (flags & BAR_ICON && icon > -1)
+	{
+		iconW = MIN(iconW, iconH) * 0.25;
+		iconH = iconW;
+
+		// adjust icon for stamina draw
+		if (icon == cgs.media.hudPowerIcon)
+		{
+			iconW *= .5f;
+
+			if (cg.snap->ps.stats[STAT_PLAYER_CLASS] == PC_FIELDOPS)
+			{
+				CG_SetChargebarIconColor();
+			}
+		}
+
+		CG_DrawPic(iconX - iconW * 0.5, iconY - iconH * 0.5, iconW, iconH, icon);
+	}
+
+	trap_R_SetColor(NULL);
 }
 
 /**
@@ -1592,7 +1698,7 @@ void CG_DrawHelpWindow(float x, float y, int *status, const char *title, const h
 	int          len, maxlen = 0;
 	int          w, h;
 	char         format[MAX_STRING_TOKENS], buf[MAX_STRING_TOKENS];
-	char         *lines[32];
+	char         *lines[64];
 	int          tSpacing = 9;      // Should derive from CG_Text_Height_Ext
 	vec4_t       bgColor         ;
 	vec4_t       bgColorTitle    ;

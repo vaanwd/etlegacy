@@ -203,6 +203,8 @@ extern vmCvar_t g_debugSkills;
 extern vmCvar_t g_heavyWeaponRestriction;
 extern vmCvar_t g_autoFireteams;
 
+extern vmCvar_t g_teamInfoUpdateRate;
+
 extern vmCvar_t g_nextmap;
 extern vmCvar_t g_nextcampaign;
 
@@ -305,6 +307,7 @@ extern vmCvar_t g_multiview;
 
 extern vmCvar_t g_stickyCharge;
 extern vmCvar_t g_xpSaver;
+extern vmCvar_t g_xpSaverMaxAge;
 
 extern vmCvar_t g_debugForSingleClient;
 extern vmCvar_t g_debugEvents;

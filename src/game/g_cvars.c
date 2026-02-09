@@ -209,6 +209,8 @@ vmCvar_t g_debugSkills;
 vmCvar_t g_heavyWeaponRestriction;
 vmCvar_t g_autoFireteams;
 
+vmCvar_t g_teamInfoUpdateRate;
+
 vmCvar_t g_nextmap;
 vmCvar_t g_nextcampaign;
 
@@ -323,6 +325,7 @@ vmCvar_t g_multiview; // 0 - off, other - enabled
 
 vmCvar_t g_stickyCharge;
 vmCvar_t g_xpSaver;
+vmCvar_t g_xpSaverMaxAge;
 
 vmCvar_t g_debugForSingleClient;
 vmCvar_t g_debugEvents;
@@ -558,6 +561,8 @@ cvarTable_t gameCvarTable[] =
 	{ &g_heavyWeaponRestriction,          "g_heavyWeaponRestriction",          "100",                        CVAR_ARCHIVE | CVAR_SERVERINFO,                  0, qfalse, qfalse },
 	{ &g_autoFireteams,                   "g_autoFireteams",                   "1",                          CVAR_ARCHIVE,                                    0, qfalse, qfalse },
 
+	{ &g_teamInfoUpdateRate,              "g_teamInfoUpdateRate",              "1000",                       CVAR_ARCHIVE,                                    0, qfalse, qfalse },
+
 	{ &g_nextmap,                         "nextmap",                           "",                           CVAR_TEMP,                                       0, qfalse, qfalse },
 	{ &g_nextcampaign,                    "nextcampaign",                      "",                           CVAR_TEMP,                                       0, qfalse, qfalse },
 
@@ -648,6 +653,7 @@ cvarTable_t gameCvarTable[] =
 #endif
 	{ &g_stickyCharge,                    "g_stickyCharge",                    "0",                          CVAR_ARCHIVE,                                    0, qfalse, qfalse },
 	{ &g_xpSaver,                         "g_xpSaver",                         "0",                          CVAR_ARCHIVE,                                    0, qfalse, qfalse },
+	{ &g_xpSaverMaxAge,                   "g_xpSaverMaxAge",                   "86400",                      CVAR_ARCHIVE,                                    0, qfalse, qfalse },
 	{ &g_suddenDeath,                     "g_suddenDeath",                     "0",                          CVAR_ARCHIVE,                                    0, qtrue,  qfalse },
 	{ &g_dropObjDelay,                    "g_dropObjDelay",                    "3000",                       CVAR_ARCHIVE,                                    0, qtrue,  qfalse },
 

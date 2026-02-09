@@ -1737,13 +1737,18 @@ void G_InitGame(int levelTime, int randomSeed, int restart, int etLegacyServer, 
 		}
 #endif
 
-		if (g_xpSaver.integer)
+		if (!(g_xpSaver.integer & XPSF_ENABLE))
 		{
 			G_Printf("^3WARNING: g_xpSaver changed to 0\n");
 			trap_Cvar_Set("g_xpSaver", "0");
 		}
 	}
 #endif
+
+	if ((g_xpSaver.integer & XPSF_CONVERT))
+	{
+		G_XPSaver_Convert();
+	}
 
 #ifdef FEATURE_RATING
 	if (g_skillRating.integer)
@@ -1762,9 +1767,20 @@ void G_InitGame(int levelTime, int randomSeed, int restart, int etLegacyServer, 
 	}
 #endif
 
-	if (g_xpSaver.integer && g_gametype.integer == GT_WOLF_CAMPAIGN)
+	if ((g_xpSaver.integer & XPSF_ENABLE) && g_gametype.integer == GT_WOLF_CAMPAIGN)
 	{
 		if (g_campaigns[level.currentCampaign].current == 0 || level.newCampaign)
+		{
+			if (!(g_xpSaver.integer & XPSF_NR_EVER))
+			{
+				G_XPSaver_Clear();
+			}
+		}
+	}
+
+	if ((g_xpSaver.integer & XPSF_ENABLE) && (g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_MAPVOTE || g_gametype.integer == GT_WOLF))
+	{
+		if (!(g_xpSaver.integer & XPSF_NR_EVER))
 		{
 			G_XPSaver_Clear();
 		}
@@ -2044,7 +2060,7 @@ int QDECL SortRanks(const void *a, const void *b)
 			totalXP[1] += cb->sess.skillpoints[i];
 		}
 
-		if (!((g_gametype.integer == GT_WOLF_CAMPAIGN && g_xpSaver.integer) ||
+		if (!(((g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_MAPVOTE || g_gametype.integer == GT_WOLF) && (g_xpSaver.integer & XPSF_ENABLE)) ||
 		      (g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
 		      (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0)))
 		{
@@ -3001,7 +3017,14 @@ void G_LogExit(const char *string)
 		}
 	}
 #endif
-	if (g_xpSaver.integer && g_gametype.integer == GT_WOLF_CAMPAIGN)
+	if (
+		(g_xpSaver.integer & XPSF_ENABLE) && (
+			(g_gametype.integer == GT_WOLF_CAMPAIGN) ||
+			((g_gametype.integer == GT_WOLF_STOPWATCH) && !(g_xpSaver.integer & XPSF_DISABLE_STOPWATCH)) ||
+			(g_gametype.integer == GT_WOLF_MAPVOTE) ||
+			(g_gametype.integer == GT_WOLF)
+			)
+		)
 	{
 		for (i = 0; i < level.numConnectedClients; i++)
 		{
@@ -3767,11 +3790,11 @@ void CheckVote(void)
 			AP(va("cpm \"^1Vote FAILED! ^7(^2Y:%d^7-^1N:%d^7) ^7(%s)\n\"", level.voteInfo.voteYes, level.voteInfo.voteNo, level.voteInfo.voteString));
 			G_LogPrintf("Vote Failed: (Y:%d-N:%d) %s (Required:%d, Voting Clients:%d)\n", level.voteInfo.voteYes, level.voteInfo.voteNo, level.voteInfo.voteString, threshold, total);
 		}
-		else if (level.time - level.voteInfo.voteTime >= VOTE_TIME) // timeout, no enough vote
+		else if (level.time - level.voteInfo.voteTime >= VOTE_TIME) // timeout, not enough votes
 		{
 			// same behavior as a no response vote
-			AP(va("cpm \"^1Vote TIMEOUT! No enough voters to pass vote ^7(^1%d^7/^2%d^7) ^7(%s)\n\"", level.voteInfo.voteYes, threshold, level.voteInfo.voteString));
-			G_LogPrintf("Vote TIMEOUT! No enough voters to pass vote (%d/%d) %s\n", level.voteInfo.voteYes, threshold, level.voteInfo.voteString);
+			AP(va("cpm \"^1Vote TIMEOUT! Not enough voters to pass vote ^7(^1%d^7/^2%d^7) ^7(%s)\n\"", level.voteInfo.voteYes, threshold, level.voteInfo.voteString));
+			G_LogPrintf("Vote TIMEOUT! Not enough voters to pass vote (%d/%d) %s\n", level.voteInfo.voteYes, threshold, level.voteInfo.voteString);
 		}
 		else
 		{

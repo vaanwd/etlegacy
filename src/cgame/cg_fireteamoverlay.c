@@ -39,17 +39,6 @@ static int sortedFireTeamClients[MAX_CLIENTS];
 #define FONT_HEADER         &cgs.media.limboFont1
 #define FONT_TEXT           &cgs.media.limboFont2
 
-// HUD editor flags
-// TODO: move these elsewhere (and probably rename)
-#define FT_LATCHED_CLASS        (BIT(0))
-#define FT_NO_HEADER            (BIT(1))
-#define FT_COLORLESS_NAME       (BIT(2))
-#define FT_STATUS_COLOR_NAME    (BIT(3))
-#define FT_STATUS_COLOR_ROW     (BIT(4))
-#define FT_SPAWN_POINT          (BIT(5))
-#define FT_SPAWN_POINT_LOC      (BIT(6))
-#define FT_SPAWN_POINT_MINOR    (BIT(7))
-
 typedef struct fireteamOverlay_s
 {
 	float x;
@@ -73,7 +62,10 @@ typedef struct fireteamOverlay_s
 	float weaponIconHeightOffset;
 
 	float classIconWidth;
-	float healthWidth;
+	float healthTextWidth;
+	float healthBarWidth;
+	float healthBarHeight;
+	float healthBarHeightOffset;
 
 	float bestNameWidth; // includes powerup icon width if present
 	float bestLocWidth;
@@ -554,7 +546,7 @@ static void CG_FTOverlay_StoreSpawnpointString(fireteamOverlay_t *fto, const int
 
 }
 
-#define HEALTH_WIDTH (CG_Text_Width_Ext_Float("999", fto->textScale, 0, FONT_TEXT))
+#define HEALTH_TEXT_WIDTH (CG_Text_Width_Ext_Float("999", fto->textScale, 0, FONT_TEXT))
 #define CLASS_ICON_ARROW_WIDTH (CG_Text_Width_Ext_Float("->", fto->textScale, 0, FONT_TEXT))
 // slightly wider than the icon size, to leave a bit of margin between the icon and name
 #define POWERUP_WIDTH (fto->iconSize * 1.25f)
@@ -625,9 +617,9 @@ static float CG_FTOverlay_WeaponIconWidthScale(fireteamOverlay_t *fto)
 
 // pretty useless, but it's clearer intention to call a function named this,
 // rather than to just write out the value
-static ID_INLINE float CG_FTOverlay_HealthWidth(const fireteamOverlay_t *fto)
+static ID_INLINE float CG_FTOverlay_HealthTextWidth(const fireteamOverlay_t *fto)
 {
-	return HEALTH_WIDTH;
+	return HEALTH_TEXT_WIDTH;
 }
 
 static float CG_FTOverlay_LocationWidth(const fireteamOverlay_t *fto, const int row)
@@ -829,10 +821,16 @@ static void CG_FTOverlay_DrawWeaponIcon(fireteamOverlay_t *fto)
 
 static void CG_FTOverlay_DrawHealth(fireteamOverlay_t *fto, const hudComponent_t *comp)
 {
-	const int  health      = fto->ci->health;
-	const int  healthWidth = HEALTH_WIDTH;
+	const int  health          = fto->ci->health;
+	const int  healthTextWidth = HEALTH_TEXT_WIDTH;
+	int        maxHealth;
 	vec4_t     color;
 	const char *text;
+
+	if (!(comp->style & FT_SPAWN_HEALTH_TEXT) && !(comp->style & FT_SPAWN_HEALTH_BAR))
+	{
+		return;
+	}
 
 	if (health > FT_HEALTH_NORMAL)
 	{
@@ -852,7 +850,7 @@ static void CG_FTOverlay_DrawHealth(fireteamOverlay_t *fto, const hudComponent_t
 	// wounded
 	else if (health == 0)
 	{
-		Vector4Copy(fto->textWhite, color);
+		Vector4Copy((cg.time % 500) > 250 ? fto->textWhite : fto->textRed, color);
 		text = va("%s*%s%i",
 		          ((cg.time % 500) > 250) ? "^7" : "^1",
 		          ((cg.time % 500) > 250) ? "^1" : "^7",
@@ -865,11 +863,25 @@ static void CG_FTOverlay_DrawHealth(fireteamOverlay_t *fto, const hudComponent_t
 		text = "0";
 	}
 
-	CG_Text_Paint_RightAligned_Ext(fto->x + healthWidth, fto->y + fto->textHeightOffset, fto->textScale, fto->textScale,
-	                               color, text, 0, 0, comp->styleText, FONT_TEXT);
+	if (comp->style & FT_SPAWN_HEALTH_TEXT)
+	{
+		CG_Text_Paint_RightAligned_Ext(fto->x + healthTextWidth, fto->y + fto->textHeightOffset, fto->textScale, fto->textScale,
+		                               color, text, 0, 0, comp->styleText, FONT_TEXT);
 
-	// always use static size, regardless of actual text being drawn
-	fto->x += healthWidth + fto->spacerInner;
+		// always use static size, regardless of actual text being drawn
+		fto->x += healthTextWidth + fto->spacerInner;
+	}
+
+	if (comp->style & FT_SPAWN_HEALTH_BAR)
+	{
+		maxHealth = CG_GetPlayerMaxHealth(fto->ci->clientNum, fto->ci->cls, fto->ci->team);
+
+		CG_FilledBar(fto->x, fto->y + fto->healthBarHeightOffset, fto->healthBarWidth, fto->healthBarHeight,
+		             color, color,
+		             comp->colorBackground, color, health / (float)maxHealth, 0.f, BAR_BORDER_SMALL, -1);
+
+		fto->x += fto->healthBarWidth + fto->spacerInner;
+	}
 }
 
 void CG_FTOverlay_DrawLocation(fireteamOverlay_t *fto, const int row, hudComponent_t *comp)
@@ -1047,6 +1059,10 @@ void CG_DrawFireTeamOverlay(hudComponent_t *comp)
 	fto->iconHeightOffset       = (fto->h - fto->iconSize) * 0.5f;
 	fto->weaponIconHeightOffset = (fto->h - (fto->textHeight * 2)) * 0.5f;
 
+	fto->healthBarHeight       = fto->textHeight * 1.5f;
+	fto->healthBarHeightOffset = (fto->h - fto->healthBarHeight) * 0.5f;
+	fto->healthBarWidth        = fto->healthBarHeight * 6.f;
+
 	// first, get the width for all the elements
 	// the width does *NOT* contain the spacer required between each element,
 	// as some of them are not necessarily drawn (location/spawnpoint)
@@ -1092,13 +1108,22 @@ void CG_DrawFireTeamOverlay(hudComponent_t *comp)
 
 	// these are always static width and just depend on fireteam overlay settings,
 	// no need to compute them inside a loop for each member
-	fto->classIconWidth = CG_FTOverlay_ClassIconWidth(fto, comp);
-	fto->healthWidth    = CG_FTOverlay_HealthWidth(fto);
+	fto->classIconWidth  = CG_FTOverlay_ClassIconWidth(fto, comp);
+	fto->healthTextWidth = CG_FTOverlay_HealthTextWidth(fto);
 
 	fixedElementsWidth = fto->classIconWidth + fto->spacerInner
 	                     + fto->bestNameWidth + fto->spacerInner
-	                     + (fto->weaponIconSize * fto->bestWeaponIconWidthScale) + fto->spacerInner
-	                     + fto->healthWidth;
+	                     + (fto->weaponIconSize * fto->bestWeaponIconWidthScale);
+
+	if (comp->style & FT_SPAWN_HEALTH_TEXT)
+	{
+		fixedElementsWidth += fto->spacerInner + fto->healthTextWidth;
+	}
+
+	if (comp->style & FT_SPAWN_HEALTH_BAR)
+	{
+		fixedElementsWidth += fto->spacerInner + fto->healthBarWidth;
+	}
 
 	// Figure out the remaining space. This is a bit complicated with locations
 	// and spawnpoint being so complicated with their possible combinations,

@@ -100,8 +100,9 @@ void CG_InitPMGraphics(void)
 	cgs.media.pmImages[PM_AMMOPICKUP]     = trap_R_RegisterShaderNoMip("gfx/limbo/filter_healthammo");
 	cgs.media.pmImages[PM_HEALTHPICKUP]   = trap_R_RegisterShaderNoMip("gfx/limbo/filter_healthammo");
 	cgs.media.pmImages[PM_WEAPONPICKUP]   = trap_R_RegisterShaderNoMip("sprites/voiceChat");
-	cgs.media.pmImages[PM_CONNECT]        = trap_R_RegisterShaderNoMip("sprites/voiceChat");
+	cgs.media.pmImages[PM_CONNECT]        = trap_R_RegisterShaderNoMip("gfx/hud/pm_radiogreendot");
 	cgs.media.pmImages[PM_ANNOUNCE]       = trap_R_RegisterShaderNoMip("sprites/voiceChat");
+	cgs.media.pmImages[PM_DISCONNECT]     = trap_R_RegisterShaderNoMip("gfx/hud/pm_radioreddot");
 
 	cgs.media.pmImageAlliesConstruct = trap_R_RegisterShaderNoMip("gfx/hud/pm_constallied");
 	cgs.media.pmImageAxisConstruct   = trap_R_RegisterShaderNoMip("gfx/hud/pm_constaxis");
@@ -109,7 +110,7 @@ void CG_InitPMGraphics(void)
 	cgs.media.pmImageAxisMine        = trap_R_RegisterShaderNoMip("gfx/hud/pm_mineaxis");
 	cgs.media.pmImageAlliesFlag      = trap_R_RegisterShaderNoMip("gfx/limbo/pm_flagallied");
 	cgs.media.pmImageAxisFlag        = trap_R_RegisterShaderNoMip("gfx/limbo/pm_flagaxis");
-	cgs.media.pmImageSpecFlag        = trap_R_RegisterShaderNoMip("sprites/voiceChat");
+	cgs.media.pmImageSpecFlag        = trap_R_RegisterShaderNoMip("gfx/limbo/but_team_spec");
 	cgs.media.hintKey                = trap_R_RegisterShaderNoMip("gfx/hud/keyboardkey_old");
 
 	// extra obituaries
@@ -141,16 +142,6 @@ void CG_InitPM(void)
 	cg_pmOldListXP     = NULL;
 	cg_pmWaitingListXP = NULL;
 }
-
-
-/*
-* These have been replaced by cvars
-* #define PM_FADETIME 2500
-* #define PM_WAITTIME 2000
-* #define PM_POPUP_TIME 1000
-*/
-
-#define PM_BIGPOPUP_TIME 2500
 
 /**
  * @brief CG_AddToListFront
@@ -261,15 +252,18 @@ void CG_UpdatePMList(pmListItem_t **waitingList, pmListItem_t **oldList, int tim
  */
 void CG_UpdatePMLists(void)
 {
-	int i;
+	int           i;
+	hudStucture_t *hud = CG_GetActiveHUD();
 
 	for (i = 0; i < NUM_PM_STACK; ++i)
 	{
-		CG_UpdatePMList(&cg_pmWaitingList[i], &cg_pmOldList[i], cg_popupTime.integer, cg_popupStayTime.integer, cg_popupFadeTime.integer);
+		hudComponent_t *pmComp = (hudComponent_t *)((byte *)&hud->popupmessages + i * sizeof(hudComponent_t));
+
+		CG_UpdatePMList(&cg_pmWaitingList[i], &cg_pmOldList[i], pmComp->feedTime, pmComp->feedStayTime, pmComp->feedFadeTime);
 	}
 
-	CG_UpdatePMList(&cg_pmWaitingListXP, &cg_pmOldListXP, cg_popupXPGainTime.integer, cg_popupXPGainStayTime.integer, cg_popupXPGainFadeTime.integer);
-	CG_UpdatePMList(&cg_pmWaitingListBig, NULL, PM_BIGPOPUP_TIME, cg_popupStayTime.integer, cg_popupFadeTime.integer);   // TODO: cvar popup BIG ?
+	CG_UpdatePMList(&cg_pmWaitingListXP, &cg_pmOldListXP, hud->xpgain.feedTime, hud->xpgain.feedStayTime, hud->xpgain.feedFadeTime);
+	CG_UpdatePMList(&cg_pmWaitingListBig, NULL, hud->pmitemsbig.feedTime, hud->pmitemsbig.feedStayTime, hud->pmitemsbig.feedFadeTime);   // TODO: cvar popup BIG ?
 }
 
 /**
@@ -928,12 +922,12 @@ void CG_DrawPM(hudComponent_t *comp)
 	}
 
 	isScapeAvailable = CG_DrawPMItems(comp, cg_pmWaitingList[pmNum], &y, lineHeight, size, comp->style & POPUP_SCROLL_DOWN,
-	                                  cg_popupTime.integer, cg_popupStayTime.integer, cg_popupFadeTime.integer);
+	                                  comp->feedTime, comp->feedStayTime, comp->feedFadeTime);
 
 	for (listItem = cg_pmOldList[pmNum]; listItem && isScapeAvailable; listItem = listItem->next)
 	{
 		isScapeAvailable = CG_DrawPMItems(comp, listItem, &y, lineHeight, size, comp->style & POPUP_SCROLL_DOWN,
-		                                  cg_popupTime.integer, cg_popupStayTime.integer, cg_popupFadeTime.integer);
+		                                  comp->feedTime, comp->feedStayTime, comp->feedFadeTime);
 	}
 }
 
@@ -954,11 +948,11 @@ void CG_DrawPMItemsBig(hudComponent_t *comp)
 	Vector4Copy(comp->colorMain, colorText);
 	Vector4Copy(comp->colorBackground, colorBackground);
 	Vector4Copy(comp->colorBorder, colorBorder);
-	t = cg_pmWaitingListBig->time + PM_BIGPOPUP_TIME + cg_popupStayTime.value;
+	t = cg_pmWaitingListBig->time + comp->feedTime + comp->feedStayTime;
 
 	if (cg.time > t)
 	{
-		float fade = cg_popupFadeTime.integer ? 1 - ((cg.time - t) / cg_popupFadeTime.value) : 0;
+		float fade = comp->feedFadeTime ? 1 - ((cg.time - t) / comp->feedFadeTime) : 0;
 
 		colorText[3]       *= fade;
 		colorBackground[3] *= fade;
@@ -1170,12 +1164,12 @@ void CG_DrawPMItemsXPGain(hudComponent_t *comp)
 	}
 
 	isScapeAvailable = CG_DrawPMXPItems(comp, cg_pmWaitingListXP, &y, lineHeight, size, comp->style & POPUP_XPGAIN_SCROLL_DOWN,
-	                                    cg_popupXPGainTime.integer, cg_popupXPGainStayTime.integer, cg_popupXPGainFadeTime.integer);
+	                                    comp->feedTime, comp->feedStayTime, comp->feedFadeTime);
 
 	for (listItem = cg_pmOldListXP; listItem && isScapeAvailable; listItem = listItem->next)
 	{
 		isScapeAvailable = CG_DrawPMXPItems(comp, listItem, &y, lineHeight, size, comp->style & POPUP_XPGAIN_SCROLL_DOWN,
-		                                    cg_popupXPGainTime.integer, cg_popupXPGainStayTime.integer, cg_popupXPGainFadeTime.integer);
+		                                    comp->feedTime, comp->feedStayTime, comp->feedFadeTime);
 	}
 }
 

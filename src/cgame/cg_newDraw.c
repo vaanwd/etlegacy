@@ -300,9 +300,8 @@ void CG_DrawPlayerWeaponIcon(rectDef_t *rect, int align, vec4_t *refcolor)
  */
 void CG_DrawCursorhint(hudComponent_t *comp)
 {
-	float     *color;
-	qhandle_t icon;
-	float     scale = 0, halfscale = 0;
+	float *color;
+	float scale = 0, halfscale = 0;
 
 	if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR)
 	{
@@ -311,95 +310,96 @@ void CG_DrawCursorhint(hudComponent_t *comp)
 
 	switch (cg.cursorHintIcon)
 	{
+	case HINT_COMPLETED:    // keep the last used hint icon shader
+		break;
 	case HINT_NONE:
 	case HINT_FORCENONE:
-	case HINT_COMPLETED:
-		icon = 0;
+		cg.lastUsedHintIcon = 0;
 		break;
 	case HINT_DOOR:
-		icon = cgs.media.doorHintShader;
+		cg.lastUsedHintIcon = cgs.media.doorHintShader;
 		break;
 	case HINT_DOOR_ROTATING:
-		icon = cgs.media.doorRotateHintShader;
+		cg.lastUsedHintIcon = cgs.media.doorRotateHintShader;
 		break;
 	case HINT_DOOR_LOCKED:
 	case HINT_DOOR_ROTATING_LOCKED:
-		icon = cgs.media.doorLockHintShader;
+		cg.lastUsedHintIcon = cgs.media.doorLockHintShader;
 		break;
 	case HINT_MG42:
-		icon = cgs.media.mg42HintShader;
+		cg.lastUsedHintIcon = cgs.media.mg42HintShader;
 		break;
 	case HINT_BREAKABLE:
-		icon = cgs.media.breakableHintShader;
+		cg.lastUsedHintIcon = cgs.media.breakableHintShader;
 		break;
 	case HINT_BREAKABLE_DYNAMITE:
-		icon = cgs.media.dynamiteHintShader;
+		cg.lastUsedHintIcon = cgs.media.dynamiteHintShader;
 		break;
 	case HINT_TANK:
-		icon = cgs.media.tankHintShader;
+		cg.lastUsedHintIcon = cgs.media.tankHintShader;
 		break;
 	case HINT_SATCHELCHARGE:
-		icon = cgs.media.satchelchargeHintShader;
+		cg.lastUsedHintIcon = cgs.media.satchelchargeHintShader;
 		break;
 	case HINT_CONSTRUCTIBLE:
-		icon = cgs.media.buildHintShader;
+		cg.lastUsedHintIcon = cgs.media.buildHintShader;
 		break;
 	case HINT_UNIFORM:
-		icon = cgs.media.uniformHintShader;
+		cg.lastUsedHintIcon = cgs.media.uniformHintShader;
 		break;
 	case HINT_LANDMINE:
-		icon = cgs.media.landmineHintShader;
+		cg.lastUsedHintIcon = cgs.media.landmineHintShader;
 		break;
 	case HINT_CHAIR:
-		icon = cgs.media.notUsableHintShader;
+		cg.lastUsedHintIcon = cgs.media.notUsableHintShader;
 		break;
 	case HINT_HEALTH:
-		icon = cgs.media.healthHintShader;
+		cg.lastUsedHintIcon = cgs.media.healthHintShader;
 		break;
 	case HINT_KNIFE:
-		icon = cgs.media.knifeHintShader;
+		cg.lastUsedHintIcon = cgs.media.knifeHintShader;
 		break;
 	case HINT_LADDER:
-		icon = cgs.media.ladderHintShader;
+		cg.lastUsedHintIcon = cgs.media.ladderHintShader;
 		break;
 	case HINT_BUTTON:
-		icon = cgs.media.buttonHintShader;
+		cg.lastUsedHintIcon = cgs.media.buttonHintShader;
 		break;
 	case HINT_WATER:
-		icon = cgs.media.waterHintShader;
+		cg.lastUsedHintIcon = cgs.media.waterHintShader;
 		break;
 	case HINT_WEAPON:
-		icon = cgs.media.weaponHintShader;
+		cg.lastUsedHintIcon = cgs.media.weaponHintShader;
 		break;
 	case HINT_AMMO:
-		icon = cgs.media.ammoHintShader;
+		cg.lastUsedHintIcon = cgs.media.ammoHintShader;
 		break;
 	case HINT_POWERUP:
-		icon = cgs.media.powerupHintShader;
+		cg.lastUsedHintIcon = cgs.media.powerupHintShader;
 		break;
 	case HINT_BUILD:
-		icon = cgs.media.buildHintShader;
+		cg.lastUsedHintIcon = cgs.media.buildHintShader;
 		break;
 	case HINT_DISARM:
-		icon = cgs.media.disarmHintShader;
+		cg.lastUsedHintIcon = cgs.media.disarmHintShader;
 		break;
 	case HINT_REVIVE:
-		icon = cgs.media.reviveHintShader;
+		cg.lastUsedHintIcon = cgs.media.reviveHintShader;
 		break;
 	case HINT_DYNAMITE:
-		icon = cgs.media.dynamiteHintShader;
+		cg.lastUsedHintIcon = cgs.media.dynamiteHintShader;
 		break;
 	case HINT_RESTRICTED:
-		icon = cgs.media.friendShader;
+		cg.lastUsedHintIcon = cgs.media.friendShader;
 		break;
 	case HINT_ACTIVATE:
 	case HINT_BAD_USER:
 	default:
-		icon = cgs.media.usableHintShader;
+		cg.lastUsedHintIcon = cgs.media.usableHintShader;
 		break;
 	}
 
-	if (!icon)
+	if (!cg.lastUsedHintIcon)
 	{
 		return;
 	}
@@ -443,7 +443,7 @@ void CG_DrawCursorhint(hudComponent_t *comp)
 
 	// set color and draw the hint
 	trap_R_SetColor(color);
-	CG_DrawPic(comp->location.x - halfscale, comp->location.y - halfscale, comp->location.w + scale, comp->location.h + scale, icon);
+	CG_DrawPic(comp->location.x - halfscale, comp->location.y - halfscale, comp->location.w + scale, comp->location.h + scale, cg.lastUsedHintIcon);
 
 	trap_R_SetColor(NULL);
 }
@@ -487,12 +487,27 @@ void CG_DrawCursorHintBar(hudComponent_t *comp)
 		return;
 	}
 
+	textColor[3] = *color;
+
 	curValue = (float)cg.cursorHintValue / 255.0f;
 
 	if (curValue > 0.01f)
 	{
-		CG_FilledBar(comp->location.x, comp->location.y, comp->location.w, comp->location.h, colorRed, colorGreen,
-		             comp->colorBackground, comp->colorBorder, curValue, 0.f, comp->style, -1);
+
+	}
+
+	if (comp->barStyle & BAR_CIRCULAR)
+	{
+		CG_DrawCircle(comp->location.x, comp->location.y, comp->location.w, comp->location.h,
+		              (comp->barStyle & BAR_LERP_COLOR) ? comp->colorSecondary : color, (comp->barStyle & BAR_LERP_COLOR) ? textColor : NULL,
+		              comp->colorBackground, comp->colorBorder, curValue, 0.f, comp->barStyle, -1,
+		              comp->circleDensityPoint, comp->circleStartAngle, comp->circleEndAngle, comp->circleThickness);
+	}
+	else
+	{
+		CG_FilledBar(comp->location.x, comp->location.y, comp->location.w, comp->location.h,
+		             (comp->barStyle & BAR_LERP_COLOR) ? comp->colorSecondary : color, (comp->barStyle & BAR_LERP_COLOR) ? textColor : NULL,
+		             comp->colorBackground, comp->colorBorder, curValue, 0.f, comp->barStyle, -1);
 	}
 }
 
@@ -601,8 +616,17 @@ void CG_DrawWeapStability(hudComponent_t *comp)
 		return;
 	}
 
-	CG_FilledBar(comp->location.x, comp->location.y, comp->location.w, comp->location.h, goodColor, badColor,
-	             comp->colorBackground, comp->colorBorder, (float)cg.snap->ps.aimSpreadScale / 255.0f, 0.f, comp->style >> 1, -1);
+	if (comp->barStyle & BAR_CIRCULAR)
+	{
+		CG_DrawCircle(comp->location.x, comp->location.y, comp->location.w, comp->location.h, goodColor, badColor,
+		              comp->colorBackground, comp->colorBorder, (float)cg.snap->ps.aimSpreadScale / 255.0f, 0.f, comp->barStyle, -1,
+		              comp->circleDensityPoint, comp->circleStartAngle, comp->circleEndAngle, comp->circleThickness);
+	}
+	else
+	{
+		CG_FilledBar(comp->location.x, comp->location.y, comp->location.w, comp->location.h, goodColor, badColor,
+		             comp->colorBackground, comp->colorBorder, (float)cg.snap->ps.aimSpreadScale / 255.0f, 0.f, comp->barStyle, -1);
+	}
 }
 
 #ifdef FEATURE_EDV
@@ -622,7 +646,7 @@ void CG_MouseEvent(int x, int y)
 	case CGAME_EVENT_MULTIVIEW:
 		if (x != 0 || y != 0)
 		{
-			cgs.cursorUpdate = cg.time + 5000;
+			cgs.cursorTimeout = cg.time + 5000;
 		} // fall through
 	case CGAME_EVENT_SPEAKEREDITOR:
 	case CGAME_EVENT_CAMERAEDITOR:
@@ -804,7 +828,7 @@ void CG_EventHandling(int type, qboolean fForced)
 	case CGAME_EVENT_DEMO:
 		cgs.fResize         = qfalse;
 		cgs.fSelect         = qfalse;
-		cgs.cursorUpdate    = cg.time + 10000;
+		cgs.cursorTimeout   = cg.time + 10000;
 		cgs.timescaleUpdate = cg.time + 4000;
 		CG_ScoresUp_f();
 		CG_HudEditorReset();
