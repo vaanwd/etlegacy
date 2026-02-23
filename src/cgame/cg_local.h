@@ -1173,7 +1173,7 @@ typedef struct
 	version_t demoVersion;
 	demoBackwardsCompat_t demoBackwardsCompat;
 
-	int etLegacyClient;                     ///< is either 0 (vanilla client) or a version integer from git_version.h
+	int etLegacyClient;                     ///< is either 0 (vanilla client) or a version integer from version_generated.h
 	qboolean loading;                       ///< don't defer players at initial startup
 	qboolean intermissionStarted;           ///< don't draw disconnect icon/message because game will end shortly
 	qboolean autoCmdExecuted;               ///< has 'cg_autoCmd' been executed yet
@@ -1667,6 +1667,7 @@ typedef struct
 	qhandle_t scoreEliminatedShader;
 
 	qhandle_t medicReviveShader;
+	qhandle_t medicReviveShader2;
 	qhandle_t disguisedShader;
 	qhandle_t voiceChatShader;
 	qhandle_t voiceChatOrangeShader;
@@ -2246,6 +2247,8 @@ enum
 	COMPASS_ALWAYS_DRAW          = BIT(7),
 	COMPASS_POINT_TOWARD_NORTH   = BIT(8),
 	COMPASS_DRAW_ICONS_INSIDE    = BIT(9),
+	COMPASS_DYNAMIC_TICKS        = BIT(10),
+	COMPASS_DYNAMIC_DIRECTION    = BIT(11),
 };
 
 // Follow filters
@@ -2265,8 +2268,8 @@ enum
 	FT_SPAWN_POINT       = BIT(5),
 	FT_SPAWN_POINT_LOC   = BIT(6),
 	FT_SPAWN_POINT_MINOR = BIT(7),
-	FT_SPAWN_HEALTH_TEXT = BIT(8),
-	FT_SPAWN_HEALTH_BAR  = BIT(9),
+	FT_HEALTH_TEXT       = BIT(8),
+	FT_MINI_HEALTH_BAR   = BIT(9),
 };
 
 /// Locations
@@ -2567,6 +2570,7 @@ typedef struct cgs_s
 	vec4_t fireteamSpritesColorSelected;
 
 	// teamchat width is *3 because of embedded color codes
+	qboolean teamChatStartLine[TEAMCHAT_MSG_MAX];
 	char teamChatMsgs[TEAMCHAT_MSG_MAX][MAX_STRING_CHARS];
 	int teamChatMsgTimes[TEAMCHAT_MSG_MAX];
 	team_t teamChatMsgTeams[TEAMCHAT_MSG_MAX];
@@ -3899,7 +3903,7 @@ void CG_CommandMap_DrawHighlightText(void);
 qboolean CG_CommandCentreSpawnPointClick(void);
 
 qhandle_t CG_GetCompassIcon(entityState_t *ent, qboolean drawAllVoicesChat, qboolean drawFireTeam, qboolean drawPrimaryObj, qboolean drawSecondaryObj, qboolean drawItemObj, qboolean drawDynamic, char *name);
-void CG_DrawCompassIcon(float x, float y, float w, float h, vec3_t origin, vec3_t dest, qhandle_t shader, float dstScale, float baseSize, mapScissor_t *scissor, qboolean drawIconInside);
+void CG_DrawCompassIcon(float x, float y, float w, float h, vec3_t origin, vec3_t dest, qhandle_t shader, float dstScale, float baseSize, mapScissor_t *scissor, int style);
 
 void CG_TransformToCommandMapCoord(float *coord_x, float *coord_y);
 

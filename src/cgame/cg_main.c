@@ -1167,6 +1167,7 @@ static void CG_RegisterGraphics(void)
 	cgs.media.spawnInvincibleShader = trap_R_RegisterShader("sprites/shield");
 	cgs.media.scoreEliminatedShader = trap_R_RegisterShader("sprites/skull");
 	cgs.media.medicReviveShader     = trap_R_RegisterShader("sprites/medic_revive");
+	cgs.media.medicReviveShader2    = trap_R_RegisterShader("sprites/medic_revive2");
 	cgs.media.disguisedShader       = trap_R_RegisterShader("sprites/undercover");
 
 	cgs.media.constructShader = trap_R_RegisterShaderNoMip("sprites/construct");
@@ -1283,12 +1284,12 @@ static void CG_RegisterGraphics(void)
 	cgs.media.ccskillPics[SK_MILITARY_INTELLIGENCE_AND_SCOPED_WEAPONS] = trap_R_RegisterShaderNoMip("gfx/limbo/cm_ic_covertops");
 
 	cgs.media.ccMedicIcon             = trap_R_RegisterShaderNoMip("sprites/cm_medic_icon");
-	cgs.media.ccMedicReviveShader     = trap_R_RegisterShader("sprites/cm_medic_revive");
+	cgs.media.ccMedicReviveShader     = trap_R_RegisterShaderNoMip("sprites/cm_medic_revive");
 	cgs.media.ccAmmoIcon              = trap_R_RegisterShaderNoMip("sprites/cm_ammo_icon");
 	cgs.media.ccVoiceChatShader       = trap_R_RegisterShaderNoMip("sprites/cm_voicechat_icon");
 	cgs.media.ccVoiceChatOrangeShader = trap_R_RegisterShaderNoMip("sprites/cm_voicechat_orange_icon");
-	cgs.media.ccGreenTick             = trap_R_RegisterShader("sprites/cm_greentick");
-	cgs.media.ccRedCross              = trap_R_RegisterShader("sprites/cm_redcross");
+	cgs.media.ccGreenTick             = trap_R_RegisterShaderNoMip("sprites/cm_greentick");
+	cgs.media.ccRedCross              = trap_R_RegisterShaderNoMip("sprites/cm_redcross");
 	cgs.media.ccFriendShader          = trap_R_RegisterShaderNoMip("sprites/cm_friendlycross");
 
 #ifdef FEATURE_PRESTIGE
@@ -2155,7 +2156,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum, qbo
 
 	//int startat = trap_Milliseconds();
 
-	Com_Printf(S_COLOR_MDGREY "Initializing %s cgame " S_COLOR_GREEN ETLEGACY_VERSION "\n", MODNAME);
+	Com_Printf(S_COLOR_MDGREY "Initializing %s cgame " S_COLOR_GREEN "%s\n", MODNAME, ETLEGACY_VERSION);
 
 	// clean up the config backup if one exists
 	CG_RestoreProfile();

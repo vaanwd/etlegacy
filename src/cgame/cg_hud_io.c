@@ -1651,6 +1651,17 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 			hudComponent_t *comp = (hudComponent_t *)((byte *)&tmpHud->popupmessages + numPopUp * sizeof(hudComponent_t));
 			int            j;
 
+			// don't update style if inherit from parent which already upgrade it
+			if (parentHud)
+			{
+				hudComponent_t *compParent = (hudComponent_t *)((byte *)&parentHud->popupmessages + numPopUp * sizeof(hudComponent_t));
+
+				if (comp->style == compParent->style)
+				{
+					continue;
+				}
+			}
+
 			for (j = 10; j > 5; --j)
 			{
 				if (CHECKBIT(comp->style, j - 1))
@@ -1683,12 +1694,12 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 	if (upgr->shiftHealthBarDynamicColorStyle2)
 	{
 		// Ensure dynamic coloration style is applied due to insertion of needle style from bar
-		if (tmpHud->crosshairbar.style & BAR_CIRCULAR)
+		if (tmpHud->crosshairbar.style & BAR_CIRCULAR << 2)
 		{
-			tmpHud->healthbar.style |= (BAR_CIRCULAR << 1);
+			tmpHud->crosshairbar.style |= (BAR_CIRCULAR << 4);
 		}
 
-		tmpHud->healthbar.style &= ~BAR_CIRCULAR;    // by default, circular bar will be desactivate
+		tmpHud->crosshairbar.style &= ~(BAR_CIRCULAR << 2);    // by default, circular bar will be desactivate
 
 		// Ensure dynamic coloration style is applied due to insertion of circular style from bar
 		if (tmpHud->healthbar.style & BAR_CIRCULAR)
@@ -1729,15 +1740,18 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 
 		if (!parentHud || (tmpHud->cursorhintsbar.style != parentHud->cursorhintsbar.style))
 		{
-			tmpHud->cursorhintsbar.barStyle = tmpHud->healthbar.style;
+			tmpHud->cursorhintsbar.barStyle = tmpHud->cursorhintsbar.style;
 			tmpHud->cursorhintsbar.style    = 0;    // clear all
 		}
 
 		if (!parentHud || (tmpHud->healthbar.style != parentHud->healthbar.style))
 		{
-			tmpHud->healthbar.barStyle  = tmpHud->healthbar.style;
-			tmpHud->healthbar.barStyle &= ~(BAR_CIRCULAR << 1);   // remove dynamic coloration style from bar style
-			tmpHud->healthbar.style     = tmpHud->healthbar.style & (BAR_CIRCULAR << 1); // keep dynamic coloration style only
+			tmpHud->healthbar.barStyle = tmpHud->healthbar.style;
+			if (tmpHud->healthbar.style & (BAR_CIRCULAR << 1))
+			{
+				tmpHud->healthbar.style     = 1; // keep dynamic coloration style only
+				tmpHud->healthbar.barStyle &= ~(BAR_CIRCULAR << 1);   // remove dynamic coloration style from bar style
+			}
 		}
 
 		if (!parentHud || (tmpHud->weaponstability.style != parentHud->weaponstability.style))
@@ -1755,7 +1769,7 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 			tmp |= (tmpHud->crosshairbar.style & CROSSHAIR_BAR_CLASS);
 			tmp |= (tmpHud->crosshairbar.style & CROSSHAIR_BAR_RANK);
 			tmp |= (tmpHud->crosshairbar.style & CROSSHAIR_BAR_PRESTIGE);
-			if (tmpHud->healthbar.style & (BAR_CIRCULAR << 1))
+			if (tmpHud->crosshairbar.style & (BAR_CIRCULAR << 4))
 			{
 				tmp |= CROSSHAIR_BAR_DYNAMIC_COLOR;
 			}

@@ -442,7 +442,7 @@ cvarTable_t gameCvarTable[] =
 
 	{ &voteFlags,                         "voteFlags",                         "0",                          CVAR_TEMP | CVAR_ROM | CVAR_SERVERINFO,          0, qfalse, qfalse },
 
-	{ &g_complaintlimit,                  "g_complaintlimit",                  "6",                          CVAR_ARCHIVE,                                    0, qtrue,  qfalse },
+	{ &g_complaintlimit,                  "g_complaintlimit",                  "0",                          CVAR_ARCHIVE,                                    0, qtrue,  qfalse },
 	{ &g_teambleedComplaint,              "g_teambleedComplaint",              "50",                         CVAR_ARCHIVE,                                    0, qtrue,  qfalse },
 	{ &g_ipcomplaintlimit,                "g_ipcomplaintlimit",                "3",                          CVAR_ARCHIVE,                                    0, qtrue,  qfalse },
 	{ &g_filtercams,                      "g_filtercams",                      "0",                          CVAR_ARCHIVE,                                    0, qfalse, qfalse },
@@ -873,7 +873,18 @@ void G_UpdateCvars(void)
 						trap_Cvar_Set(cv->cvarName, "33");
 					}
 				}
-				else if (cv->vmCvar == &team_maxSoldiers || cv->vmCvar == &team_maxMedics || cv->vmCvar == &team_maxEngineers || cv->vmCvar == &team_maxFieldops || cv->vmCvar == &team_maxCovertops || cv->vmCvar == &team_maxMortars || cv->vmCvar == &team_maxFlamers || cv->vmCvar == &team_maxMachineguns || cv->vmCvar == &team_maxRockets || cv->vmCvar == &team_maxRiflegrenades || cv->vmCvar == &team_maxplayers)
+				else if (cv->vmCvar == &team_maxSoldiers ||
+				         cv->vmCvar == &team_maxMedics ||
+				         cv->vmCvar == &team_maxEngineers ||
+				         cv->vmCvar == &team_maxFieldops ||
+				         cv->vmCvar == &team_maxCovertops ||
+				         cv->vmCvar == &team_maxMortars ||
+				         cv->vmCvar == &team_maxFlamers ||
+				         cv->vmCvar == &team_maxMachineguns ||
+				         cv->vmCvar == &team_maxRockets ||
+				         cv->vmCvar == &team_maxRiflegrenades ||
+				         cv->vmCvar == &team_maxLandmines ||
+				         cv->vmCvar == &team_maxplayers)
 				{
 					clsweaprestriction = qtrue;
 				}

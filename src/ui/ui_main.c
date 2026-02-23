@@ -245,6 +245,7 @@ void _UI_DrawTopBottom(float x, float y, float w, float h, float size)
 
 /**
  * @brief UI_DrawRect
+ * Draw an unfilled rectangle.
  * Coordinates are 640*480 virtual values
  * @param[in] x
  * @param[in] y
@@ -588,9 +589,10 @@ void Text_Paint_Ext(float x, float y, float scalex, float scaley, vec4_t color, 
 
 	if (text)
 	{
-		const char *s    = text;
-		int        len   = Q_UTF8_Strlen(text);
-		int        count = 0;
+		const char *s             = text;
+		int        len            = Q_UTF8_Strlen(text);
+		int        count          = 0;
+		qboolean   is_accelerator = qfalse;
 
 		trap_R_SetColor(color);
 		Com_Memcpy(&newColor[0], &color[0], sizeof(vec4_t));
@@ -612,7 +614,14 @@ void Text_Paint_Ext(float x, float y, float scalex, float scaley, vec4_t color, 
 
 			glyph = Q_UTF8_GetGlyph(font, s);
 
-			if (Q_IsColorString(s))
+
+			if (Q_IsAcceleratorString(s))
+			{
+				is_accelerator = qtrue;
+				s             += 2;
+				continue;
+			}
+			else if (Q_IsColorString(s))
 			{
 				if (*(s + 1) == COLOR_NULL)
 				{
@@ -643,6 +652,17 @@ void Text_Paint_Ext(float x, float y, float scalex, float scaley, vec4_t color, 
 
 					colorBlack[3] = 1.0;
 				}
+
+				if (is_accelerator)
+				{
+					trap_R_SetColor(colorBlack);
+					UI_FillRect(x + (glyph->pitch * scalex * 1.2),
+					            y - yadj + (glyph->imageHeight * scaley) + 1.0,
+					            glyph->imageWidth * scalex * 0.9, 0.5, newColor);
+					trap_R_SetColor(newColor);
+					is_accelerator = qfalse;
+				}
+
 				Text_PaintCharExt(x + (glyph->pitch * scalex), y - yadj, glyph->imageWidth, glyph->imageHeight, scalex, scaley, glyph->s, glyph->t, glyph->s2, glyph->t2, glyph->glyph);
 
 				x += (glyph->xSkip * scalex) + adjust;
@@ -4904,6 +4924,18 @@ void UI_RunMenuScript(char **args)
 		{
 			UI_LoadMods();
 		}
+		else if (Q_stricmp(name, "ChangelogInit") == 0)
+		{
+			UI_ChangelogInit();
+		}
+		else if (Q_stricmp(name, "ChangelogNext") == 0)
+		{
+			UI_ChangelogNext();
+		}
+		else if (Q_stricmp(name, "ChangelogPrevious") == 0)
+		{
+			UI_ChangelogPrevious();
+		}
 		else if (Q_stricmp(name, "playMovie") == 0)
 		{
 			if (uiInfo.previewMovie >= 0)
@@ -7411,6 +7443,8 @@ static int UI_FeederCount(int feederID)
 		return uiInfo.serverStatus.numDisplayServers;
 	case FEEDER_SERVERSTATUS:
 		return uiInfo.serverStatusInfo.numLines;
+	case FEEDER_CHANGELOG:
+		return UI_ChangelogFeederCount();
 	case FEEDER_PLAYER_LIST:
 		if (uiInfo.uiDC.realTime > uiInfo.playerRefresh)
 		{
@@ -7933,6 +7967,15 @@ const char *UI_FeederItemText(int feederID, int index, int column, qhandle_t *ha
 			}
 		}
 		break;
+	case FEEDER_CHANGELOG:
+	{
+		const char *lineText = UI_ChangelogFeederItemText(index, column);
+		if (lineText)
+		{
+			return lineText;
+		}
+	}
+	break;
 	case FEEDER_PLAYER_LIST:
 		if (index >= 0 && index < uiInfo.playerCount)
 		{
@@ -8112,6 +8155,10 @@ static void UI_FeederSelection(int feederID, int index)
 			trap_Cvar_Set("team_headmodel", va("*%s", uiInfo.characterList[index].name));
 			updateModel = qtrue;
 		}
+		break;
+	case FEEDER_CHANGELOG:
+		// Read-only feeder; line selection does not trigger additional behavior.
+		UI_ChangelogFeederSelection(index);
 		break;
 	case FEEDER_Q3HEADS:
 		if (index >= 0 && index < uiInfo.q3HeadCount)
@@ -8590,7 +8637,7 @@ static void UI_RunCinematicFrame(int handle)
 void UI_Init(int etLegacyClient, int clientVersion)
 {
 	int x;
-	Com_Printf(S_COLOR_MDGREY "Initializing %s ui " S_COLOR_GREEN ETLEGACY_VERSION "\n", MODNAME);
+	Com_Printf(S_COLOR_MDGREY "Initializing %s ui " S_COLOR_GREEN "%s\n", MODNAME, ETLEGACY_VERSION);
 
 	UI_RegisterCvars();
 	UI_InitMemory();

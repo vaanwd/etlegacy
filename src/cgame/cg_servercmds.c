@@ -1226,6 +1226,8 @@ void CG_AddToTeamChat(const char *str, int clientnum) // FIXME: add disguise?
 		                 TEAMCHAT_MSG_MAX);
 	}
 
+	cgs.teamChatStartLine[cgs.teamChatPos % chatHeight] = qtrue;
+
 	p  = cgs.teamChatMsgs[cgs.teamChatPos % chatHeight];
 	*p = 0;
 
@@ -1252,6 +1254,8 @@ void CG_AddToTeamChat(const char *str, int clientnum) // FIXME: add disguise?
 				cgs.teamChatMsgTeams[cgs.teamChatPos % chatHeight] = cgs.clientinfo[clientnum].team;
 			}
 			cgs.teamChatPos++;
+
+			cgs.teamChatStartLine[cgs.teamChatPos % chatHeight] = qfalse;
 			p    = cgs.teamChatMsgs[cgs.teamChatPos % chatHeight];
 			*p   = 0;
 			*p++ = Q_COLOR_ESCAPE;
@@ -1279,7 +1283,7 @@ void CG_AddToTeamChat(const char *str, int clientnum) // FIXME: add disguise?
 	// console chat
 	if (clientnum == -1)
 	{
-		cgs.teamChatMsgTeams[cgs.teamChatPos % chatHeight] = TEAM_SPECTATOR;
+		cgs.teamChatMsgTeams[cgs.teamChatPos % chatHeight] = TEAM_FREE;
 	}
 	else
 	{
