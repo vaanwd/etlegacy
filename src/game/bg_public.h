@@ -2121,8 +2121,9 @@ typedef enum
 
 	HINT_BAD_USER,              ///< invisible user with no target
 	HINT_COMPLETED,
+	HINT_NO_DARM_FIRST_REVIVE,  ///< first-revive restriction icon for explosive arm/disarm interactions
 
-	HINT_NUM_HINTS = 51,
+	HINT_NUM_HINTS = 52,
 } hintType_t;
 
 void BG_EvaluateTrajectory(const trajectory_t *tr, int atTime, vec3_t result, qboolean isAngle, int splinePath);
@@ -2132,6 +2133,9 @@ void BG_GetMarkDir(const vec3_t dir, const vec3_t normal, vec3_t out);
 void BG_AddPredictableEventToPlayerstate(int newEvent, int eventParm, playerState_t *ps);
 
 void BG_PlayerStateToEntityState(playerState_t *ps, entityState_t *s, int time, qboolean snap);
+
+qboolean BG_PlayerTouchesBox(playerState_t *ps, entityState_t *item, int atTime, int sideLength);
+qboolean BG_PlayerTouchesCylender(playerState_t *ps, entityState_t *item, int atTime, int sideLength);
 
 qboolean BG_PlayerTouchesObjective(playerState_t *ps, entityState_t *item, int atTime);
 qboolean BG_PlayerTouchesItem(playerState_t *ps, entityState_t *item, int atTime);
@@ -2783,7 +2787,7 @@ extern const char *bg_fireteamNamesAxis[MAX_FIRETEAMS / 2];
 typedef struct
 {
 	int ident;
-	char joinOrder[MAX_CLIENTS];    ///< order in which clients joined the fire team (server), client uses to store if a client is on this fireteam
+	signed char joinOrder[MAX_CLIENTS];    ///< order in which clients joined the fire team (server), client uses to store if a client is on this fireteam
 	int leader;                     ///< leader = joinOrder[0] on server, stored here on client
 	qboolean inuse;
 	qboolean priv;

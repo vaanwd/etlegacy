@@ -49,6 +49,7 @@ int dll_trap_SysFlashWindow;
 int dll_trap_CommandComplete;
 int dll_trap_CmdBackup_Ext;
 int dll_trap_MatchPaused;
+int dll_trap_CvarSetDescription;
 
 /**
  * @brief This is the only way control passes into the module.
@@ -838,9 +839,13 @@ static void CG_RegisterSounds(void)
 		}
 	}
 
-	cgs.media.countFight   = trap_S_RegisterSound("sound/osp/fight.wav", qfalse);
-	cgs.media.countPrepare = trap_S_RegisterSound("sound/osp/prepare.wav", qfalse);
-	cgs.media.goatAxis     = trap_S_RegisterSound("sound/osp/goat.wav", qfalse);
+	cgs.media.countFight             = trap_S_RegisterSound("sound/osp/fight.wav", qfalse);
+	cgs.media.countPrepare           = trap_S_RegisterSound("sound/osp/prepare.wav", qfalse);
+	cgs.media.goatAxis               = trap_S_RegisterSound("sound/osp/goat.wav", qfalse);
+	cgs.media.reinforceTickSound     = trap_S_RegisterSound("sound/multiplayer/tick.wav", qfalse);
+	cgs.media.reinforceTockSound     = trap_S_RegisterSound("sound/multiplayer/tock.wav", qfalse);
+	cgs.media.reinforceTickLoudSound = trap_S_RegisterSound("sound/multiplayer/tickLoud.wav", qfalse);
+	cgs.media.reinforceTockLoudSound = trap_S_RegisterSound("sound/multiplayer/tockLoud.wav", qfalse);
 
 	cgs.media.headShot = trap_S_RegisterSound("sound/hitsounds/hithead.wav", qfalse);
 	cgs.media.bodyShot = trap_S_RegisterSound("sound/hitsounds/hit.wav", qfalse);
@@ -1586,6 +1591,7 @@ static void CG_RegisterGraphics(void)
 
 	cgs.media.axisFlag       = trap_R_RegisterShaderNoMip("gfx/limbo/flag_axis");
 	cgs.media.alliedFlag     = trap_R_RegisterShaderNoMip("gfx/limbo/flag_allied");
+	cgs.media.spectatorFlag  = trap_R_RegisterShaderNoMip("gfx/limbo/flag_spectator");
 	cgs.media.disconnectIcon = trap_R_RegisterShaderNoMip("gfx/2d/net");
 
 	cgs.media.cm_spec_icon  = trap_R_RegisterShaderNoMip("ui/assets/mp_spec");
@@ -2121,6 +2127,7 @@ static ID_INLINE void CG_SetupExtensions(void)
 		CG_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_CommandComplete, "trap_CommandComplete_Legacy");
 		CG_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_CmdBackup_Ext, "trap_CmdBackup_Ext_Legacy");
 		CG_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_MatchPaused, "trap_MatchPaused_Legacy");
+		CG_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_CvarSetDescription, "trap_CvarSetDescription_Legacy");
 	}
 }
 
@@ -2191,7 +2198,9 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum, qbo
 
 	cg.demoPlayback = demoPlayback;
 
-	MOD_CHECK_ETLEGACY(etLegacyClient, clientVersion, cg.etLegacyClient);
+	MOD_CHECK_ETLEGACY(clientVersion, cg.etLegacyClient);
+
+	I18N_Init();
 
 	// get the rendering configuration from the client system
 	trap_GetGlconfig(&cgs.glconfig);

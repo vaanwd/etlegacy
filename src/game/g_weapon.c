@@ -340,10 +340,12 @@ void ReviveEntityEvent(gentity_t *reviver, gentity_t *revivee, int invulnEndTime
  */
 void ReviveEntity(gentity_t *ent, gentity_t *traceEnt)
 {
-	vec3_t  org;
-	trace_t tr;
-	int     healamt, headshot, oldclasstime = 0;
-	int     invulnEndTime;
+	vec3_t   org;
+	vec3_t   legacyReviveAngles;
+	trace_t  tr;
+	int      healamt, headshot, oldclasstime = 0;
+	int      invulnEndTime;
+	qboolean useLegacyReviveAngles;
 
 	// heal the dude
 	// copy some stuff out that we'll wanna restore
@@ -363,7 +365,17 @@ void ReviveEntity(gentity_t *ent, gentity_t *traceEnt)
 	// keep class special weapon time to keep them from exploiting revives
 	oldclasstime = traceEnt->client->ps.classWeaponTime;
 
+	// Capture revive orientation before ClientSpawn rebuilds playerstate data.
+	useLegacyReviveAngles = G_LegacyRevive_GetReviveViewAngles(traceEnt, legacyReviveAngles);
+
 	ClientSpawn(traceEnt, qtrue, qfalse, qtrue, qtrue);
+
+	if (useLegacyReviveAngles)
+	{
+		// Preserve legacy downed/current look direction after revive spawn reinitialization.
+		SetClientViewAngle(traceEnt, legacyReviveAngles);
+	}
+
 	invulnEndTime = traceEnt->client->ps.powerups[PW_INVULNERABLE];
 
 #ifdef FEATURE_OMNIBOT
@@ -421,6 +433,65 @@ void ReviveEntity(gentity_t *ent, gentity_t *traceEnt)
 }
 
 /**
+ * @brief Try to heal a living teammate with a syringe when enabled by cvar.
+ * @param[in] healer
+ * @param[in,out] target
+ * @param[out] refundAmmo Set to qtrue when the syringe should be refunded.
+ * @return qtrue if syringe healing logic handled this target, qfalse otherwise.
+ */
+static qboolean G_TrySyringeHeal(gentity_t *healer, gentity_t *target, qboolean *refundAmmo)
+{
+	int maxHealth;
+	int healAmount;
+
+	*refundAmmo = qfalse;
+
+	// Keep stock ET behavior unless explicitly enabled.
+	if (g_syringeHealing.integer != 1)
+	{
+		return qfalse;
+	}
+
+	// Only living players are eligible for syringe healing.
+	if (!target->client || target->client->ps.pm_type != PM_NORMAL)
+	{
+		return qfalse;
+	}
+
+	// Invalid heal targets still consume the shot, so we refund here.
+	if (target->client->sess.sessionTeam != healer->client->sess.sessionTeam)
+	{
+		*refundAmmo = qtrue;
+		return qtrue;
+	}
+
+	maxHealth = target->client->ps.stats[STAT_MAX_HEALTH];
+	if (target->health > (int)(maxHealth * 0.25f))
+	{
+		*refundAmmo = qtrue;
+		return qtrue;
+	}
+
+	if (BG_IsSkillAvailable(healer->client->sess.skill, SK_FIRST_AID, SK_MEDIC_FULL_REVIVE))
+	{
+		healAmount = maxHealth;
+	}
+	else
+	{
+		healAmount = (int)(maxHealth * 0.5f);
+	}
+
+	target->health                         = healAmount;
+	target->client->ps.stats[STAT_HEALTH]  = healAmount;
+	target->client->pers.lasthealth_client = healer->s.clientNum;
+
+	G_Sound(target, GAMESOUND_MISC_REVIVE);
+	G_AddSkillPoints(healer, SK_FIRST_AID, 2.f, "healing");
+
+	return qtrue;
+}
+
+/**
 * @brief Shoot the syringe, do the old lazarus bit
 *
 * @param[in,out] ent
@@ -432,6 +503,7 @@ gentity_t *Weapon_Syringe(gentity_t *ent)
 	trace_t   tr;
 	gentity_t *traceEnt;
 	int       i;
+	qboolean  refundAmmo;
 
 	AngleVectors(ent->client->ps.viewangles, forward, right, up);
 	CalcMuzzlePointForActivate(ent, forward, right, up, muzzleTrace);
@@ -486,6 +558,16 @@ gentity_t *Weapon_Syringe(gentity_t *ent)
 	{
 		// give back ammo
 		ent->client->ps.ammoclip[GetWeaponTableData(WP_MEDIC_SYRINGE)->clipIndex] += 1;
+		return NULL;
+	}
+
+	// Optional syringe-heal logic for living teammates.
+	if (G_TrySyringeHeal(ent, traceEnt, &refundAmmo))
+	{
+		if (refundAmmo)
+		{
+			ent->client->ps.ammoclip[GetWeaponTableData(WP_MEDIC_SYRINGE)->clipIndex] += 1;
+		}
 		return NULL;
 	}
 
@@ -1679,14 +1761,20 @@ void G_RepairEmplacedGun(gentity_t *traceEnt, gentity_t *ent)
  * @brief G_RecoverLandmine
  * @param[in,out] traceEnt
  * @param[in,out] ent
+ *
+ * @note This incorrectly gives back the charge to the player who tries to arm the landmine,
+ * not the player who originally threw the landmine. This bug originates from etmain,
+ * and has become a feature that some players purposefully utilize, to pass charge
+ * between players. Only the stats are corrected here to take away the shot from
+ * the player who threw the mine, not the player who tried to arm it (also a bug in etmain).
  */
 void G_RecoverLandmine(gentity_t *traceEnt, gentity_t *ent)
 {
-	G_FreeEntity(traceEnt);
+	gentity_t *owner = g_entities + traceEnt->s.clientNum;
 
-	Add_Ammo(ent, WP_LANDMINE, 1, qfalse);
+	Add_Ammo(owner, WP_LANDMINE, 1, qfalse);
 
-	// give back the correct charge amount
+	// give back the correct charge amount (potentially to "wrong" player, see the note above)
 	if (BG_IsSkillAvailable(ent->client->sess.skill, SK_EXPLOSIVES_AND_CONSTRUCTION, SK_ENGINEER_STAMINA))
 	{
 		ent->client->ps.classWeaponTime -= .33f * level.engineerChargeTime[ent->client->sess.sessionTeam - 1];
@@ -1695,7 +1783,12 @@ void G_RecoverLandmine(gentity_t *traceEnt, gentity_t *ent)
 	{
 		ent->client->ps.classWeaponTime -= .5f * level.engineerChargeTime[ent->client->sess.sessionTeam - 1];
 	}
-	ent->client->sess.aWeaponStats[WS_LANDMINE].atts--;
+
+	// take away a shot from the player who threw the mine (not necessarily the same player who's trying to arm it)
+	owner->client->sess.aWeaponStats[WS_LANDMINE].atts--;
+
+	// free at the very end so traceEnt stays valid for long enough
+	G_FreeEntity(traceEnt);
 }
 
 /**
@@ -2425,6 +2518,12 @@ gentity_t *Weapon_Engineer(gentity_t *ent)
 	}
 	else if (traceEnt->methodOfDeath == MOD_DYNAMITE)
 	{
+		// During the first-revive stand-up restriction, only dynamite plier interaction is blocked.
+		if (G_LegacyRevive_IsFirstReviveRestricted(ent))
+		{
+			return NULL;
+		}
+
 		// not armed
 		if (!traceEnt->s.effect1Time)
 		{

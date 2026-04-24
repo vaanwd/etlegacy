@@ -1083,6 +1083,11 @@ struct gclient_s
 	damageReceivedStats_t dmgReceivedSts[MAX_CLIENTS];
 
 	int isSpawnInvulnerability;
+
+	// Legacy revive compatibility state.
+	vec3_t legacyDownedViewAngles;            ///< View direction at the moment player got downed.
+	qboolean legacyDownedViewAnglesValid;     ///< True when downed angles are valid for revive restore.
+	int legacyRevivesSinceRespawn;            ///< Number of revives since last full respawn.
 };
 
 /**
@@ -1650,6 +1655,7 @@ void G_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_t
 void G_DamageExt(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_t dir, vec3_t point, int damage, int dflags, meansOfDeath_t mod, int *hitEventType);
 qboolean G_RadiusDamage(vec3_t origin, gentity_t *inflictor, gentity_t *attacker, float damage, float radius, gentity_t *ignore, meansOfDeath_t mod);
 qboolean etpro_RadiusDamage(vec3_t origin, gentity_t *inflictor, gentity_t *attacker, float damage, float radius, gentity_t *ignore, meansOfDeath_t mod, qboolean clientsonly);
+void GibEntity(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, qboolean heavyDirectGib);
 void body_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, meansOfDeath_t meansOfDeath);
 void TossWeapons(gentity_t *self);
 gentity_t *G_BuildHead(gentity_t *ent, grefEntity_t *refent, qboolean newRefent);
@@ -1739,6 +1745,10 @@ void respawn(gentity_t *ent);
 void BeginIntermission(void);
 void InitBodyQue(void);
 void ClientSpawn(gentity_t *ent, qboolean revived, qboolean teamChange, qboolean restoreHealth, qboolean toggleTeleport);
+void G_LegacyRevive_RecordDownedViewAngles(gentity_t *ent);
+void G_LegacyRevive_OnClientSpawn(gentity_t *ent, qboolean revived);
+qboolean G_LegacyRevive_GetReviveViewAngles(gentity_t *ent, vec3_t outViewAngles);
+qboolean G_LegacyRevive_IsFirstReviveRestricted(gentity_t *ent);
 void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, meansOfDeath_t meansOfDeath);
 void AddKillScore(gentity_t *ent, int score);
 void CalculateRanks(void);
@@ -1812,10 +1822,12 @@ qboolean trap_GetValue(char *value, int valueSize, const char *key);
 void trap_DemoSupport(const char *commands);
 void trap_SnapshotCallbackExt(void);
 void trap_SnapshotSetClientMask(int clientNum, uint64_t mask);
+void trap_Cvar_SetDescription(const char *cvarName, const char *description);
 extern int dll_com_trapGetValue;
 extern int dll_trap_DemoSupport;
 extern int dll_trap_SnapshotCallbackExt;
 extern int dll_trap_SnapshotSetClientMask;
+extern int dll_trap_CvarSetDescription;
 
 // g_demo_legacy.c
 void G_DemoStateChanged(demoState_t demoState, int demoClientsNum);

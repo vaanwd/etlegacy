@@ -37,6 +37,8 @@
 #include "ui_cvars.h"
 
 uiInfo_t uiInfo;
+int      dll_com_trapGetValue;
+int      dll_trap_CvarSetDescription;
 
 static const char *MonthAbbrev[] =
 {
@@ -84,10 +86,12 @@ static int UI_CampaignCount(qboolean singlePlayer);
 qboolean UI_CheckExecKey(int key);
 
 static void UI_ParseGameInfo(const char *teamFile);
+static void UI_RegisterCvarDescriptionsFromTooltips(void);
 
 void Menu_ShowItemByName(menuDef_t *menu, const char *p, qboolean bShow);
 
-static char translated_yes[4], translated_no[4];
+static qboolean ui_demoSortAscendingCached;
+static char     translated_yes[4], translated_no[4];
 
 void UI_Init(int etLegacyClient, int clientVersion);
 void UI_Shutdown(void);
@@ -95,6 +99,30 @@ void UI_KeyEvent(int key, qboolean down);
 void UI_MouseEvent(int dx, int dy);
 void UI_Refresh(int realtime);
 qboolean _UI_IsFullscreen(void);
+
+static ID_INLINE void UI_SetupExtensionTrap(char *value, int valueSize, int *trap, const char *name)
+{
+	if (trap_GetValue(value, valueSize, name))
+	{
+		*trap = Q_atoi(value);
+	}
+	else
+	{
+		*trap = qfalse;
+	}
+}
+
+static ID_INLINE void UI_SetupExtensions(void)
+{
+	char value[MAX_CVAR_VALUE_STRING];
+
+	trap_Cvar_VariableStringBuffer("//trap_GetValue", value, sizeof(value));
+	if (value[0])
+	{
+		dll_com_trapGetValue = Q_atoi(value);
+		UI_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_CvarSetDescription, "trap_CvarSetDescription_Legacy");
+	}
+}
 
 static uiMenuCommand_t UI_AdjustedMenuCommand(const uiMenuCommand_t menutype)
 {
@@ -981,7 +1009,7 @@ static void Text_Paint_LimitY(float *maxY, float x, float y, float scale, vec4_t
 /**
  * @brief UI_ShowPostGame
  */
-void UI_ShowPostGame()
+void UI_ShowPostGame(void)
 {
 	trap_Cvar_Set("cg_thirdPerson", "0");
 	trap_Cvar_Set("sv_killserver", "1");
@@ -1466,7 +1494,12 @@ void UI_LoadMenus(const char *menuFile, qboolean reset)
 	// Show the UI a bit differently on mobile devices
 	trap_PC_AddGlobalDefine("ANDROID");
 #endif
-
+#ifdef FEATURE_MULTIVIEW
+	trap_PC_AddGlobalDefine("FEATURE_MULTIVIEW");
+#endif
+#ifdef FEATURE_EDV
+	trap_PC_AddGlobalDefine("FEATURE_EDV");
+#endif
 	trap_PC_AddGlobalDefine(va("__WINDOW_WIDTH %f", (uiInfo.uiDC.glconfig.windowAspect / RATIO43) * 640));
 	trap_PC_AddGlobalDefine("__WINDOW_HEIGHT 480");
 
@@ -1548,6 +1581,32 @@ void UI_Load(void)
 	UI_LoadMenus(menuSet, qtrue);
 	Menus_CloseAll();
 	Menus_ActivateByName(lastName, qtrue);
+}
+
+/**
+ * @brief Backfill missing engine cvar descriptions from parsed UI tooltips.
+ */
+static void UI_RegisterCvarDescriptionsFromTooltips(void)
+{
+	int i;
+	int j;
+
+	for (i = 0; i < menuCount; i++)
+	{
+		menuDef_t *menu = &Menus[i];
+
+		for (j = 0; j < menu->itemCount; j++)
+		{
+			itemDef_t *item = menu->items[j];
+
+			if (!item || !item->cvar || !item->cvar[0] || !item->rawTooltip || !item->rawTooltip[0])
+			{
+				continue;
+			}
+
+			trap_Cvar_SetDescription(item->cvar, item->rawTooltip);
+		}
+	}
 }
 
 /**
@@ -4404,10 +4463,18 @@ static int UI_DemoSort(const void *a, const void *b)
 
 	if (fileA->file != fileB->file)
 	{
+		// Keep directories grouped before demo files while reversing the
+		// alphabetical order within each group.
 		return (int)fileA->file - (int)fileB->file;
 	}
 
-	return Q_stricmp(fileA->path, fileB->path);
+	// Reverse only the name ordering and keep directories grouped before demo files.
+	if (ui_demoSortAscendingCached)
+	{
+		return Q_stricmp(fileA->path, fileB->path);
+	}
+
+	return Q_stricmp(fileB->path, fileA->path);
 }
 
 /**
@@ -4423,6 +4490,9 @@ static void UI_LoadDemos(void)
 
 	uiInfo.demos.count = 0;
 	// uiInfo.demos.index = 0;
+
+	trap_Cvar_Update(&ui_demoSortAscending);
+	ui_demoSortAscendingCached = ui_demoSortAscending.integer != 0;
 
 	Com_sprintf(path, sizeof(path), "demos");
 	if (uiInfo.demos.path[0])
@@ -4508,6 +4578,10 @@ static void UI_LoadDemos(void)
 			qsort(uiInfo.demos.items, uiInfo.demos.count, sizeof(demoItem_t), UI_DemoSort);
 		}
 	}
+
+	// Reset the feeder selection after each reload so keyboard activation keeps
+	// operating on a valid entry when changing directories or sort order.
+	Menu_SetFeederSelection(NULL, FEEDER_DEMOS, 0, NULL);
 }
 
 /**
@@ -6120,7 +6194,8 @@ void UI_RunMenuScript(char **args)
 			int   ui_r_ignorehwgamma                  = (int)(trap_Cvar_VariableValue("r_ignorehwgamma"));
 			char  ui_r_texturemode[MAX_CVAR_VALUE_STRING];
 
-			trap_Cvar_VariableStringBuffer("cl_lang", ui_cl_lang, sizeof(ui_cl_lang));
+			// Mirror the effective language so the options UI matches pending profile changes.
+			trap_Cvar_LatchedVariableStringBuffer("cl_lang", ui_cl_lang, sizeof(ui_cl_lang));
 			trap_Cvar_VariableStringBuffer("r_texturemode", ui_r_texturemode, sizeof(ui_r_texturemode));
 
 			trap_Cvar_Set("ui_cl_lang", ui_cl_lang);
@@ -6391,7 +6466,7 @@ void UI_RunMenuScript(char **args)
 			trap_Cvar_Set("ui_browserShowWeaponsRestricted", "0");
 			trap_Cvar_Set("ui_browserShowAntilag", "0");
 			trap_Cvar_Set("ui_browserShowTeamBalanced", "0");
-			trap_Cvar_Set("ui_browserShowHumans", "0");
+			trap_Cvar_Set("ui_browserShowHumans", "1");
 			trap_Cvar_Set("ui_browserMapFilterCheckBox", "0");
 			trap_Cvar_Set("ui_browserModFilter", "0");
 		}
@@ -6406,7 +6481,7 @@ void UI_RunMenuScript(char **args)
 			trap_Cvar_Set("ui_browserShowWeaponsRestricted", "0");
 			trap_Cvar_Set("ui_browserShowAntilag", "0");
 			trap_Cvar_Set("ui_browserShowTeamBalanced", "0");
-			trap_Cvar_Set("ui_browserShowHumans", "0");
+			trap_Cvar_Set("ui_browserShowHumans", "1");
 			trap_Cvar_Set("ui_browserMapFilterCheckBox", "0");
 			trap_Cvar_Set("ui_browserModFilter", "0");
 		}
@@ -6421,7 +6496,7 @@ void UI_RunMenuScript(char **args)
 			trap_Cvar_Set("ui_browserShowWeaponsRestricted", "0");
 			trap_Cvar_Set("ui_browserShowAntilag", "0");
 			trap_Cvar_Set("ui_browserShowTeamBalanced", "0");
-			trap_Cvar_Set("ui_browserShowHumans", "0");
+			trap_Cvar_Set("ui_browserShowHumans", "1");
 			trap_Cvar_Set("ui_browserMapFilterCheckBox", "0");
 			trap_Cvar_Set("ui_browserModFilter", "0");
 		}
@@ -6436,7 +6511,7 @@ void UI_RunMenuScript(char **args)
 			trap_Cvar_Set("ui_browserShowWeaponsRestricted", "0");
 			trap_Cvar_Set("ui_browserShowAntilag", "0");
 			trap_Cvar_Set("ui_browserShowTeamBalanced", "0");
-			trap_Cvar_Set("ui_browserShowHumans", "0");
+			trap_Cvar_Set("ui_browserShowHumans", "1");
 			trap_Cvar_Set("ui_browserMapFilterCheckBox", "0");
 			trap_Cvar_Set("ui_browserModFilter", "0");
 		}
@@ -8642,6 +8717,9 @@ void UI_Init(int etLegacyClient, int clientVersion)
 	UI_RegisterCvars();
 	UI_InitMemory();
 	trap_PC_RemoveAllGlobalDefines();
+	UI_SetupExtensions();
+
+	I18N_Init();
 
 	trap_Cvar_Set("ui_menuFiles", DEFAULT_MENU_FILE);   // we need to hardwire for wolfMP
 
@@ -8664,7 +8742,7 @@ void UI_Init(int etLegacyClient, int clientVersion)
 		uiInfo.uiDC.bias = 0;
 	}
 
-	MOD_CHECK_ETLEGACY(etLegacyClient, clientVersion, uiInfo.etLegacyClient);
+	MOD_CHECK_ETLEGACY(clientVersion, uiInfo.etLegacyClient);
 
 	uiInfo.uiDC.etLegacyClient = uiInfo.etLegacyClient;
 
@@ -8798,6 +8876,7 @@ void UI_Init(int etLegacyClient, int clientVersion)
 	UI_ParseGameInfo("gameinfo.txt");
 
 	UI_LoadMenus(DEFAULT_MENU_FILE, qfalse);
+	UI_RegisterCvarDescriptionsFromTooltips();
 
 	Menus_CloseAll();
 
@@ -8821,11 +8900,7 @@ void UI_Init(int etLegacyClient, int clientVersion)
 	Q_strncpyz(translated_yes, DC->translateString("Yes"), sizeof(translated_yes));
 	Q_strncpyz(translated_no, DC->translateString("NO"), sizeof(translated_no));
 
-	trap_AddCommand("campaign");
-	trap_AddCommand("listcampaigns");
-
-	trap_AddCommand("listfavs");
-	trap_AddCommand("removefavs");
+	UI_InitConsoleCommand();
 }
 
 /**
@@ -9369,9 +9444,17 @@ static void UI_StartServerRefresh(qboolean full)
  */
 void UI_Campaign_f(void)
 {
-	char           str[MAX_TOKEN_CHARS];
-	int            i;
-	campaignInfo_t *campaign = NULL;
+	char            str[MAX_TOKEN_CHARS];
+	int             i;
+	campaignInfo_t  *campaign = NULL;
+	uiClientState_t cstate;
+
+	trap_GetClientState(&cstate);
+	if (cstate.connState != CA_DISCONNECTED)
+	{
+		Com_Printf("Cannot parse UI campaign while connected to a server\n");
+		return;
+	}
 
 	UI_LoadArenas();
 	UI_MapCountByGameType(qfalse);
@@ -9416,7 +9499,15 @@ void UI_Campaign_f(void)
  */
 void UI_ListCampaigns_f(void)
 {
-	int i, mpCampaigns = 0;
+	int             i, mpCampaigns = 0;
+	uiClientState_t cstate;
+
+	trap_GetClientState(&cstate);
+	if (cstate.connState != CA_DISCONNECTED)
+	{
+		Com_Printf("Cannot parse UI list campaign while connected to a server\n");
+		return;
+	}
 
 	UI_LoadArenas();
 	UI_MapCountByGameType(qfalse);
@@ -9507,7 +9598,7 @@ const char *UI_TranslateString(const char *string)
 
 	buf = buffer[buffOffset++ % TRANSLATION_BUFFERS];
 
-	trap_TranslateString(string, buf);
+	Q_strncpyz(buf, I18N_TranslateMod(string), sizeof(buffer[0]));
 
 	return buf;
 }

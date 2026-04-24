@@ -87,6 +87,50 @@ static void CG_Viewpos_f(void)
 }
 
 /**
+ * @brief CG_WeapzoomDown_f
+ */
+static void CG_WeapzoomDown_f(void)
+{
+	if (!CG_WeapzoomAllowed_f())
+	{
+		return;
+	}
+
+	if (cg.weapzoomActive)
+	{
+		return;
+	}
+
+	cg.weapzoomActive = qtrue;
+}
+
+/**
+ * @brief CG_WeapzoomUp_f
+ */
+static void CG_WeapzoomUp_f(void)
+{
+	if (!cg.weapzoomActive)
+	{
+		return;
+	}
+
+	cg.weapzoomActive = qfalse;
+}
+
+/**
+ * @brief CG_ToggleWeapzoom_f
+ */
+static void CG_ToggleWeapzoom_f(void)
+{
+	if (!CG_WeapzoomAllowed_f())
+	{
+		return;
+	}
+
+	cg.weapzoomActive = !cg.weapzoomActive;
+}
+
+/**
  * @brief CG_LimboMenu_f
  */
 void CG_LimboMenu_f(void)
@@ -586,17 +630,6 @@ static void CG_TeamVoiceChat_f(void)
 	if (trap_Argc() != 2)
 	{
 		return;
-	}
-
-	// don't let spectators voice chat
-	// NOTE - This cg.snap will be the person you are following, but its just for intermission test
-	if (cg.snap && (cg.snap->ps.pm_type != PM_INTERMISSION))
-	{
-		if (cgs.clientinfo[cg.clientNum].team == TEAM_SPECTATOR || cgs.clientinfo[cg.clientNum].team == TEAM_FREE)
-		{
-			CG_Printf("%s", CG_TranslateString("Can't team voice chat as a spectator.\n")); // FIXME? find a way to print this on screen
-			return;
-		}
 	}
 
 	trap_Argv(1, chatCmd, 64);
@@ -1704,7 +1737,7 @@ static void CG_ShareTimer_f(void)
 	qtime_t ct;
 	char    *cmd, *stChar, text[MAX_SAY_TEXT];
 	int     st, limboTime, nextSpawn;
-	stChar = CG_SpawnTimerText();
+	stChar = CG_SpawnTimerText(qfalse);
 
 	if (stChar == NULL)
 	{
@@ -3460,6 +3493,9 @@ static consoleCommand_t commands[] =
 	{ "nextskin",               CG_TestModelNextSkin_f       },
 	{ "prevskin",               CG_TestModelPrevSkin_f       },
 	{ "viewpos",                CG_Viewpos_f                 },
+	{ "+weapzoom",              CG_WeapzoomDown_f            },
+	{ "-weapzoom",              CG_WeapzoomUp_f              },
+	{ "toggleweapzoom",         CG_ToggleWeapzoom_f          },
 	{ "+scores",                CG_ScoresDown_f              },
 	{ "-scores",                CG_ScoresUp_f                },
 	{ "zoomin",                 CG_ZoomIn_f                  },

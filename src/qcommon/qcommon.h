@@ -720,6 +720,8 @@ int Cvar_VariableIntegerValue(const char *var_name);
 // returns 0 if not defined or non numeric
 
 char *Cvar_VariableString(const char *var_name);
+char *Cvar_DefaultString(const char *var_name);
+const char *Cvar_VariableDescription(const char *var_name);
 void Cvar_VariableStringBuffer(const char *var_name, char *buffer, size_t bufsize);
 // returns an empty string if not defined
 void Cvar_LatchedVariableStringBuffer(const char *var_name, char *buffer, size_t bufsize);
@@ -755,6 +757,7 @@ char *Cvar_InfoString_Big(int bit);
 void Cvar_InfoStringBuffer(int bit, char *buff, size_t buffsize);
 void Cvar_CheckRange(cvar_t *cv, float minVal, float maxVal, qboolean shouldBeIntegral);
 void Cvar_SetDescription(cvar_t *cv, const char *varDescription);
+qboolean Cvar_SetDescriptionByName(const char *varName, const char *varDescription);
 
 void Cvar_Restart(qboolean unsetVM);
 void Cvar_Restart_f(void);
@@ -1607,22 +1610,11 @@ void Com_GetHunkInfo(int *hunkused, int *hunkexpected);
 Native language support
 ==============================================================
 */
-#ifdef FEATURE_GETTEXT
-
 #define _(x) I18N_Translate(x)
 #define __(x) I18N_TranslateMod(x)
 
-void I18N_Init(void);
 void I18N_SetLanguage(const char *language);
-const char *I18N_Translate(const char *msgid);
-const char *I18N_TranslateMod(const char *msgid);
-
 extern qboolean doTranslateMod;
-
-#else // FEATURE_GETTEXT
-#define _(x) x
-#define __(x) x
-#endif
 
 // auth.c
 #ifdef LEGACY_AUTH

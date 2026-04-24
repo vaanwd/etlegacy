@@ -90,6 +90,7 @@ int dll_com_trapGetValue;
 int dll_trap_DemoSupport;
 int dll_trap_SnapshotCallbackExt;
 int dll_trap_SnapshotSetClientMask;
+int dll_trap_CvarSetDescription;
 
 /**
  * @brief G_SnapshotCallbackExt
@@ -539,7 +540,13 @@ void G_CheckForCursorHints(gentity_t *ent)
 		// show medics a syringe if they can revive someone
 		if (traceEnt->client && traceEnt->client->sess.sessionTeam == ent->client->sess.sessionTeam)
 		{
-			if (ps->stats[STAT_PLAYER_CLASS] == PC_MEDIC && traceEnt->client->ps.pm_type == PM_DEAD && !(traceEnt->client->ps.pm_flags & PMF_LIMBO))
+			if (ps->stats[STAT_PLAYER_CLASS] == PC_MEDIC
+			    // reviving downed players
+			    && ((traceEnt->client->ps.pm_type == PM_DEAD && !(traceEnt->client->ps.pm_flags & PMF_LIMBO))
+			        // optionally healing living players
+			        || (g_syringeHealing.integer == 1
+			            && traceEnt->client->ps.pm_type == PM_NORMAL
+			            && traceEnt->health <= (int)(traceEnt->client->ps.stats[STAT_MAX_HEALTH] * 0.25f))))
 			{
 				hintDist = CH_REVIVE_DIST;        // matches weapon_syringe in g_weapon.c
 				hintType = HINT_REVIVE;
@@ -925,23 +932,32 @@ void G_CheckForCursorHints(gentity_t *ent)
 				if (ps->stats[STAT_PLAYER_CLASS] == PC_ENGINEER)
 				{
 					hintDist = CH_BREAKABLE_DIST;
-					hintType = HINT_DISARM;
-					hintVal  = checkEnt->health;            // also send health to client for visualization
-					if (hintVal > 255)
+					if (checkEnt->methodOfDeath == MOD_DYNAMITE && G_LegacyRevive_IsFirstReviveRestricted(ent))
 					{
-						hintVal = 255;
+						// During the first revive stand-up, only dynamite arm/disarm is blocked.
+						hintType = HINT_NO_DARM_FIRST_REVIVE;
+						hintVal  = 0;
+					}
+					else
+					{
+						hintType = HINT_DISARM;
+						hintVal  = checkEnt->health;            // also send health to client for visualization
+						if (hintVal > 255)
+						{
+							hintVal = 255;
+						}
 					}
 				}
 
 				// hint icon specified in entity (and proper contact was made, so hintType was set)
 				// first try the checkent...
-				if (checkEnt->s.dmgFlags && hintType)
+				if (hintType != HINT_NO_DARM_FIRST_REVIVE && checkEnt->s.dmgFlags && hintType)
 				{
 					hintType = checkEnt->s.dmgFlags;
 				}
 
 				// then the traceent
-				if (traceEnt->s.dmgFlags && hintType)
+				if (hintType != HINT_NO_DARM_FIRST_REVIVE && traceEnt->s.dmgFlags && hintType)
 				{
 					hintType = traceEnt->s.dmgFlags;
 				}
@@ -1379,6 +1395,7 @@ static ID_INLINE void G_SetupExtensions(void)
 		G_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_DemoSupport, "trap_DemoSupport_Legacy");
 		G_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_SnapshotCallbackExt, "trap_SnapshotCallbackExt_Legacy");
 		G_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_SnapshotSetClientMask, "trap_SnapshotSetClientMask_Legacy");
+		G_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_CvarSetDescription, "trap_CvarSetDescription_Legacy");
 	}
 }
 
@@ -3656,6 +3673,14 @@ void CheckWolfMP(void)
 			{
 				level.warmupTime += 10000;
 				trap_Cvar_Set("g_restarted", "1");
+				if (g_gametype.integer == GT_WOLF_CAMPAIGN && !level.newCampaign)
+				{
+					int i;
+					for (i = 0; i < level.numConnectedClients; i++)
+					{
+						Com_Memset(&level.clients[level.sortedClients[i]].sess.aWeaponStats, 0, sizeof(level.clients[level.sortedClients[i]].sess.aWeaponStats));
+					}
+				}
 				trap_SendConsoleCommand(EXEC_APPEND, "map_restart 0\n");
 				level.restarted = qtrue;
 				return;

@@ -1114,7 +1114,7 @@ void CG_DrawTeamInfo(hudComponent_t *comp)
 				}
 				else if (cgs.teamChatMsgTeams[i % chatHeight] == TEAM_SPECTATOR)
 				{
-					flag = cgs.media.pmImageSpecFlag;
+					flag = cgs.media.spectatorFlag;
 				}
 				else
 				{
@@ -1747,15 +1747,20 @@ static void CG_DrawNoShootIcon(hudComponent_t *comp)
 	}
 	else if (cg.crosshairClientNoShoot)
 	{
-		float *color = CG_FadeColor(cg.crosshairEntTime, cg_drawCrosshairFade.integer);
+		vec4_t hintColor;
+		float  hintAlpha;
 
-		if (!color)
+		// Keep visibility timing from cg_crosshairHintsFade, but do not fade alpha with it.
+		if (!cg.crosshairEntTime || cg_crosshairHintsFade.integer <= 0 || (cg.time - cg.crosshairEntTime) >= cg_crosshairHintsFade.integer)
 		{
 			trap_R_SetColor(NULL);
 			return;
 		}
 
-		trap_R_SetColor(color);
+		hintAlpha    = Com_Clamp(0.f, 1.f, cg_crosshairHintsAlpha.value);
+		hintColor[0] = hintColor[1] = hintColor[2] = 1.f;
+		hintColor[3] = hintAlpha;
+		trap_R_SetColor(hintColor);
 	}
 	else
 	{
@@ -2098,7 +2103,7 @@ static void CG_CheckForCursorHints()
 	{
 		// simulate cursor hint
 		cg.cursorHintTime  = cg.time;
-		cg.cursorHintFade  = cg_drawHintFade.integer;
+		cg.cursorHintFade  = cg_cursorHintsFade.integer;
 		cg.cursorHintIcon  = HINT_BREAKABLE;
 		cg.cursorHintValue = 128.f;
 		return;
@@ -2107,7 +2112,7 @@ static void CG_CheckForCursorHints()
 	if (cg.snap->ps.serverCursorHint)      // server is dictating a cursor hint, use it.
 	{
 		cg.cursorHintTime  = cg.time;
-		cg.cursorHintFade  = cg_drawHintFade.integer;   // fade out time
+		cg.cursorHintFade  = cg_cursorHintsFade.integer; // fade out time
 		cg.cursorHintIcon  = cg.snap->ps.serverCursorHint;
 		cg.cursorHintValue = cg.snap->ps.serverCursorHintVal;
 		return;
@@ -2134,7 +2139,7 @@ static void CG_CheckForCursorHints()
 			{
 				cg.cursorHintIcon  = HINT_WATER;
 				cg.cursorHintTime  = cg.time;
-				cg.cursorHintFade  = cg_drawHintFade.integer;
+				cg.cursorHintFade  = cg_cursorHintsFade.integer;
 				cg.cursorHintValue = 0;
 			}
 		}
@@ -2159,7 +2164,7 @@ static void CG_CheckForCursorHints()
 			{
 				cg.cursorHintIcon  = HINT_LADDER;
 				cg.cursorHintTime  = cg.time;
-				cg.cursorHintFade  = cg_drawHintFade.integer;
+				cg.cursorHintFade  = cg_cursorHintsFade.integer;
 				cg.cursorHintValue = 0;
 			}
 		}
@@ -3391,6 +3396,12 @@ void CG_DrawWarmupTitle(hudComponent_t *comp)
 void CG_DrawWarmupText(hudComponent_t *comp)
 {
 	const char *s = NULL, *s1 = NULL, *s2 = NULL;
+
+	if (cg.cursorHintIcon == HINT_NO_DARM_FIRST_REVIVE)
+	{
+		CG_DrawCompMultilineText(comp, "^9No ^zDynamite ^9Arm/Disarm\n^z1st^9 Revive per Spawn\n\n ", comp->colorMain, comp->alignText, comp->styleText, &cgs.media.limboFont2);
+		return;
+	}
 
 	if (!cg.warmup || cg.generatingNoiseHud)
 	{

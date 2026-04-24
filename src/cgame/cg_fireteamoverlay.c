@@ -537,15 +537,15 @@ static void CG_FTOverlay_StoreLocationString(fireteamOverlay_t *fto, const int r
 
 static void CG_FTOverlay_StoreSpawnpointString(fireteamOverlay_t *fto, const int row, const hudComponent_t *comp)
 {
+	char locMsg[MAX_LOC_LEN];
+
 	if (!(comp->style & FT_SPAWN_POINT_LOC))
 	{
 		return;
 	}
 
-	Q_strncpyz(fto->spawnPtStr[row],
-	           Q_CleanStr(CG_GetLocationMsg(fto->ci->clientNum, cgs.majorSpawnpointEnt[fto->ci->spawnpt - 1].origin)),
-	           sizeof(fto->spawnPtStr[row]));
-
+	Q_strncpyz(locMsg, CG_GetLocationMsg(fto->ci->clientNum, cgs.majorSpawnpointEnt[fto->ci->spawnpt - 1].origin), sizeof(locMsg));
+	Q_strncpyz(fto->spawnPtStr[row], Q_CleanStr(locMsg), sizeof(fto->spawnPtStr[row]));
 }
 
 #define HEALTH_TEXT_WIDTH (CG_Text_Width_Ext_Float("999", fto->textScale, 0, FONT_TEXT))
@@ -761,7 +761,7 @@ static void CG_FTOverlay_DrawPowerupIcon(fireteamOverlay_t *fto)
 	}
 	else if (fto->ci->health <= 0)
 	{
-		icon = fto->ci->health == 0 ? cgs.media.medicIcon : cgs.media.scoreEliminatedShader;
+		icon = fto->ci->health == 0 ? cgs.media.medicReviveShader2 : cgs.media.scoreEliminatedShader;
 	}
 
 	if (icon != -1)
@@ -816,14 +816,14 @@ static void CG_FTOverlay_DrawWeaponIcon(fireteamOverlay_t *fto)
 }
 
 #define FT_HEALTH_NORMAL 80
-#define FT_HEALTH_YELLOW 10
+#define FT_HEALTH_YELLOW 1
 
 static void CG_FTOverlay_DrawHealth(fireteamOverlay_t *fto, hudComponent_t *comp)
 {
-	const int  health          = fto->ci->health;
-	const int  healthTextWidth = HEALTH_TEXT_WIDTH;
-	int        maxHealth;
-	vec4_t     color;
+	const int health          = fto->ci->health;
+	const int healthTextWidth = HEALTH_TEXT_WIDTH;
+	int       maxHealth;
+	vec4_t    color;
 
 	if (!(comp->style & FT_HEALTH_TEXT) && !(comp->style & FT_MINI_HEALTH_BAR))
 	{
@@ -835,8 +835,19 @@ static void CG_FTOverlay_DrawHealth(fireteamOverlay_t *fto, hudComponent_t *comp
 
 	if (comp->style & FT_HEALTH_TEXT)
 	{
+		const char *asterisk;
+
+		if (fto->ci->health == 0)
+		{
+			asterisk = va("*^%c", (cg.time % 500) > 250 ? '1' : '7');
+		}
+		else
+		{
+			asterisk = "";
+		}
+
 		CG_Text_Paint_RightAligned_Ext(fto->x + healthTextWidth, fto->y + fto->textHeightOffset, fto->textScale, fto->textScale,
-		                               color, va("%i", MAX(health, 0)), 0, 0, comp->styleText, FONT_TEXT);
+		                               color, va("%s%i", asterisk, MAX(health, 0)), 0, 0, comp->styleText, FONT_TEXT);
 
 		// always use static size, regardless of actual text being drawn
 		fto->x += healthTextWidth + fto->spacerInner;
@@ -1257,22 +1268,23 @@ static fireteamMemberStatusEnum_t CG_FireTeamMemberStatus(clientInfo_t *ci)
 	{
 		return TIMEOUT;
 	}
-	else if (ci->powerups & (1 << PW_INVULNERABLE))
+
+	if (ci->powerups & (1 << PW_INVULNERABLE))
 	{
 		return INVULNERABLE;
 	}
-	else if (ci->health == 0)
+
+	if (ci->health == 0)
 	{
 		return WOUNDED;
 	}
-	else if (ci->health < 0)
+
+	if (ci->health < 0)
 	{
 		return DEAD;
 	}
-	else
-	{
-		return NONE;
-	}
+
+	return NONE;
 }
 
 static vec4_t * CG_FireTeamNameColor(fireteamMemberStatusEnum_t status)
@@ -1295,29 +1307,23 @@ static vec4_t * CG_FireTeamNameColor(fireteamMemberStatusEnum_t status)
 
 static vec4_t * CG_FireTeamHealthColor(clientInfo_t *ci, hudComponent_t *comp)
 {
-	if (ci->powerups & (1 << PW_INVULNERABLE))
-	{
-		return &colorMdCyan;
-	}
-	else if (ci->health > FT_HEALTH_NORMAL)
+	if (ci->health > FT_HEALTH_NORMAL)
 	{
 		return &comp->colorMain;
 	}
-	else if (ci->health >= FT_HEALTH_YELLOW)
+
+	if (ci->health >= FT_HEALTH_YELLOW)
 	{
 		return &colorYellow;
 	}
-	else if (ci->health > 0)
-	{
-		return &colorRed;
-	}
+
 	// wounded
-	else if (ci->health == 0)
+	if (ci->health == 0)
 	{
-		return (cg.time % 500) > 250 ? &colorYellow : &colorRed;
+		return (cg.time % 500) > 250 ? &colorWhite : &colorRed;
 	}
 
-	// limbo (-1 health)
+	// limbo (< 0 health)
 	return &colorRed;
 }
 

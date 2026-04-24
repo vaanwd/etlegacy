@@ -300,8 +300,9 @@ void CG_DrawPlayerWeaponIcon(rectDef_t *rect, int align, vec4_t *refcolor)
  */
 void CG_DrawCursorhint(hudComponent_t *comp)
 {
-	float *color;
-	float scale = 0, halfscale = 0;
+	vec4_t color;
+	float  scale = 0, halfscale = 0;
+	float  hintAlpha;
 
 	if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR)
 	{
@@ -392,6 +393,9 @@ void CG_DrawCursorhint(hudComponent_t *comp)
 	case HINT_RESTRICTED:
 		cg.lastUsedHintIcon = cgs.media.friendShader;
 		break;
+	case HINT_NO_DARM_FIRST_REVIVE:
+		cg.lastUsedHintIcon = cgs.media.doorLockHintShader;
+		break;
 	case HINT_ACTIVATE:
 	case HINT_BAD_USER:
 	default:
@@ -404,13 +408,17 @@ void CG_DrawCursorhint(hudComponent_t *comp)
 		return;
 	}
 
-	// color
-	color = CG_FadeColor(cg.cursorHintTime, cg.cursorHintFade);
-	if (!color)
+	// Keep visibility timing from cg_cursorHintsFade, but do not fade alpha with it.
+	if (!cg.cursorHintTime || cg.cursorHintFade <= 0 || (cg.time - cg.cursorHintTime) >= cg.cursorHintFade)
 	{
 		trap_R_SetColor(NULL);
 		return;
 	}
+
+	// color
+	hintAlpha = Com_Clamp(0.f, 1.f, cg_cursorHintsAlpha.value);
+	color[0]  = color[1] = color[2] = 1.f;
+	color[3]  = hintAlpha;
 
 	// color
 	if (comp->style & 4)
@@ -454,9 +462,10 @@ void CG_DrawCursorhint(hudComponent_t *comp)
  */
 void CG_DrawCursorHintBar(hudComponent_t *comp)
 {
-	float  *color;
+	vec4_t color;
 	vec4_t textColor;
 	float  curValue;
+	float  hintAlpha;
 
 	if (cgs.clientinfo[cg.clientNum].shoutcaster)
 	{
@@ -478,16 +487,20 @@ void CG_DrawCursorHintBar(hudComponent_t *comp)
 		return;
 	}
 
-	// color
-	Vector4Copy(comp->colorMain, textColor);
-	color = CG_FadeColor_Ext(cg.cursorHintTime, cg.cursorHintFade, textColor[3]);
-	if (!color)
+	// Keep visibility timing from cg_cursorHintsFade, but do not fade alpha with it.
+	if (!cg.cursorHintTime || cg.cursorHintFade <= 0 || (cg.time - cg.cursorHintTime) >= cg.cursorHintFade)
 	{
 		trap_R_SetColor(NULL);
 		return;
 	}
 
-	textColor[3] = *color;
+	// color
+	Vector4Copy(comp->colorMain, textColor);
+	hintAlpha = Com_Clamp(0.f, 1.f, cg_cursorHintsAlpha.value);
+	color[0]  = color[1] = color[2] = textColor[3] * hintAlpha;
+	color[3]  = textColor[3] * hintAlpha;
+
+	textColor[3] = color[3];
 
 	curValue = (float)cg.cursorHintValue / 255.0f;
 
@@ -517,9 +530,9 @@ void CG_DrawCursorHintBar(hudComponent_t *comp)
  */
 void CG_DrawCursorHintText(hudComponent_t *comp)
 {
-	float      *color;
 	vec4_t     textColor;
 	const char *str;
+	float      hintAlpha;
 
 	if (cgs.clientinfo[cg.clientNum].shoutcaster)
 	{
@@ -541,18 +554,20 @@ void CG_DrawCursorHintText(hudComponent_t *comp)
 		return;
 	}
 
-	// color
-	Vector4Copy(comp->colorMain, textColor);
-	color = CG_FadeColor_Ext(cg.cursorHintTime, cg.cursorHintFade, textColor[3]);
-	if (!color)
+	// Keep visibility timing from cg_cursorHintsFade, but do not fade alpha with it.
+	if (!cg.cursorHintTime || cg.cursorHintFade <= 0 || (cg.time - cg.cursorHintTime) >= cg.cursorHintFade)
 	{
 		trap_R_SetColor(NULL);
 		return;
 	}
 
+	// color
+	Vector4Copy(comp->colorMain, textColor);
+	hintAlpha = Com_Clamp(0.f, 1.f, cg_cursorHintsAlpha.value);
+
 	str = va("%.0f%s", MIN((cg.cursorHintValue / 255.f) * 100, 100), (comp->style & 1) ? " %" : "");
 
-	textColor[3] = color[3];
+	textColor[3] *= hintAlpha;
 	CG_DrawCompText(comp, str, textColor, comp->styleText, &cgs.media.limboFont1);
 }
 
@@ -587,6 +602,7 @@ qboolean CG_OwnerDrawVisible(int flags)
 void CG_DrawWeapStability(hudComponent_t *comp)
 {
 	static vec4_t goodColor = { 0, 1, 0, 0.5f }, badColor = { 1, 0, 0, 0.5f };
+	float         spread;
 
 	if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR)
 	{
@@ -606,26 +622,30 @@ void CG_DrawWeapStability(hudComponent_t *comp)
 		return;
 	}
 
-	if (!(cg.snap->ps.aimSpreadScale))
-	{
-		return;
-	}
-
 	if (cg.renderingThirdPerson)
 	{
 		return;
 	}
 
+	if (cg.predictedPlayerState.groundEntityNum == ENTITYNUM_NONE)
+	{
+		spread = 255.0f;
+	}
+	else
+	{
+		spread = (float)cg.snap->ps.aimSpreadScale;
+	}
+
 	if (comp->barStyle & BAR_CIRCULAR)
 	{
 		CG_DrawCircle(comp->location.x, comp->location.y, comp->location.w, comp->location.h, goodColor, badColor,
-		              comp->colorBackground, comp->colorBorder, (float)cg.snap->ps.aimSpreadScale / 255.0f, 0.f, comp->barStyle, -1,
+		              comp->colorBackground, comp->colorBorder, spread / 255.0f, 0.f, comp->barStyle, -1,
 		              comp->circleDensityPoint, comp->circleStartAngle, comp->circleEndAngle, comp->circleThickness);
 	}
 	else
 	{
 		CG_FilledBar(comp->location.x, comp->location.y, comp->location.w, comp->location.h, goodColor, badColor,
-		             comp->colorBackground, comp->colorBorder, (float)cg.snap->ps.aimSpreadScale / 255.0f, 0.f, comp->barStyle, -1);
+		             comp->colorBackground, comp->colorBorder, spread / 255.0f, 0.f, comp->barStyle, -1);
 	}
 }
 
