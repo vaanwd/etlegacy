@@ -40,6 +40,7 @@ hudData_t      hudData;
 hudComponent_t *showOnlyHudComponent = NULL;
 
 static lagometer_t lagometer;
+static int         fps;
 
 /**
 * @var hudComponentFields
@@ -2042,8 +2043,8 @@ void CG_DrawObjectiveStatus(hudComponent_t *comp)
 			// display team flag
 			color[3] = 1.f;
 			trap_R_SetColor(color);
-			CG_DrawPic(comp->location.x, comp->location.y + flagIconHeightOffset, flagIconWidth, flagIconHeight, ps->persistant[PERS_TEAM] == TEAM_AXIS ? cgs.media.axisFlag : cgs.media.alliedFlag);
-			CG_DrawPic(comp->location.x + comp->location.w - flagIconWidth, comp->location.y + flagIconHeightOffset, flagIconWidth, flagIconHeight, ps->persistant[PERS_TEAM] == TEAM_AXIS ? cgs.media.alliedFlag : cgs.media.axisFlag);
+			CG_DrawPic(comp->location.x, comp->location.y + flagIconHeightOffset, flagIconWidth, flagIconHeight, CG_GetTeamFlag(ps->persistant[PERS_TEAM]));
+			CG_DrawPic(comp->location.x + comp->location.w - flagIconWidth, comp->location.y + flagIconHeightOffset, flagIconWidth, flagIconHeight, CG_GetTeamFlag(ps->persistant[PERS_TEAM] == TEAM_AXIS ? TEAM_ALLIES : TEAM_AXIS));
 
 			// clear debug flag
 			cg.flagIndicator &= ~(1 << PW_NUM_POWERUPS);
@@ -3067,20 +3068,19 @@ void CG_DrawSpeed(hudComponent_t *comp)
 #define MAX_FPS_FRAMES  500
 
 /**
- * @brief CG_DrawFPS
- * @param[in] comp
- * @return
+ * @brief CG_ComputeFPS
  */
-void CG_DrawFPS(hudComponent_t *comp)
+void CG_ComputeFPS(void)
 {
 	static int          previousTimes[MAX_FPS_FRAMES];
 	static int          previous;
 	static unsigned int index;
-	const char          *s;
 	int                 t;
 	int                 frameTime;
 
-	t = trap_Milliseconds(); // don't use serverTime, because that will be drifting to correct for internet lag changes, timescales, timedemos, etc
+	// don't use serverTime, because that will be drifting
+	// to correct for internet lag changes, timescales, timedemos, etc
+	t = trap_Milliseconds();
 
 	frameTime = t - previous;
 	previous  = t;
@@ -3090,11 +3090,11 @@ void CG_DrawFPS(hudComponent_t *comp)
 
 	if (index > MAX_FPS_FRAMES)
 	{
-		int i, fps;
+		unsigned int i;
 		// average multiple frames together to smooth changes out a bit
 		int total = 0;
 
-		for (i = 0 ; i < MAX_FPS_FRAMES ; ++i)
+		for (i = 0; i < MAX_FPS_FRAMES; ++i)
 		{
 			total += previousTimes[i];
 		}
@@ -3102,15 +3102,22 @@ void CG_DrawFPS(hudComponent_t *comp)
 		total = total ? total : 1;
 
 		fps = 1000 * MAX_FPS_FRAMES / total;
-
-		s = va("%i FPS", fps);
 	}
 	else
 	{
-		s = "estimating";
+		fps = -1;
 	}
+}
 
-	CG_DrawCompText(comp, s, comp->colorMain, comp->styleText, &cgs.media.limboFont1);
+/**
+ * @brief CG_DrawFPS
+ * @param[in] comp
+ * @return
+ */
+void CG_DrawFPS(hudComponent_t *comp)
+{
+	CG_DrawCompText(comp, (fps == -1) ? "estimating" : va("%i FPS", fps),
+	                comp->colorMain, comp->styleText, &cgs.media.limboFont1);
 }
 
 /**
@@ -3136,10 +3143,10 @@ char *CG_SpawnTimerText(qboolean isDoubleDigits)
 			}
 		}
 	}
-	else if (cg_spawnTimer_set.integer != -1 && cg_spawnTimer_period.integer > 0 && cgs.gamestate != GS_PLAYING)
+	else if (cg_spawnTimer_set.integer != -1 && cgs.gamestate != GS_PLAYING)
 	{
 		// We are not playing and the timer is set so reset/disable it
-		// this happens for example when custom period is set by timerSet and map is restarted or changed
+		// this happens for example when map is restarted or changed
 		trap_Cvar_Set("cg_spawnTimer_set", "-1");
 	}
 	return NULL;
@@ -3156,7 +3163,9 @@ static qboolean CG_SpawnTimersText(char **s, char **rt, qboolean isDoubleDigits)
 {
 	if (cgs.gamestate != GS_PLAYING)
 	{
-		int limbotimeOwn, limbotimeEnemy;
+		int limbotimeOwn;
+		int limbotimeEnemy;
+
 		if (cgs.clientinfo[cg.snap->ps.clientNum].team == TEAM_AXIS)
 		{
 			limbotimeOwn   = cg_redlimbotime.integer;
@@ -3171,10 +3180,18 @@ static qboolean CG_SpawnTimersText(char **s, char **rt, qboolean isDoubleDigits)
 		*rt = va(isDoubleDigits ? "%02i" : "%0i", limbotimeEnemy / 1000);
 		*s  = (cgs.gametype == GT_WOLF_LMS && !cgs.clientinfo[cg.clientNum].shoutcaster) ? va("%s", CG_TranslateString("WARMUP")) : va(isDoubleDigits ? "%02i" : "%0i", limbotimeOwn / 1000);
 
+		// We are not playing and the timer is set so reset/disable it
+		// this happens for example when map is restarted or changed
+		if (cg_spawnTimer_set.integer != -1)
+		{
+			trap_Cvar_Set("cg_spawnTimer_set", "-1");
+		}
+
 		// if hud editor is up, return qfalse since we want to see text style changes
 		return !cg.generatingNoiseHud;
 	}
-	else if (cgs.gametype != GT_WOLF_LMS)
+
+	if (cgs.gametype != GT_WOLF_LMS)
 	{
 		if (cgs.clientinfo[cg.clientNum].shoutcaster)
 		{
@@ -3279,7 +3296,12 @@ static char *CG_RoundTimerText()
 		return "WARMUP";
 	}
 
-	if (CG_RoundTime(&qt) < 0 && cgs.timelimit > 0.0f)
+	if (cgs.timelimit <= 0.0f)
+	{
+		return "";
+	}
+
+	if (CG_RoundTime(&qt) < 0)
 	{
 		return "00:00"; // round ended
 	}

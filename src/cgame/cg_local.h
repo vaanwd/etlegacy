@@ -1353,6 +1353,7 @@ typedef struct
 	int grenLastTime;
 	int lastBeingRevivedTime;
 	int lastReviveTime;
+	qboolean spawnInvulnerability;
 
 	int switchbackWeapon;
 	int lastFiredWeapon;
@@ -2924,6 +2925,11 @@ void CG_EventHandling(int type, qboolean fForced);
 int CG_RoundTime(qtime_t *qtime);
 qboolean CG_IsDemoVersionBelow(int major, int minor, int patch);
 
+#define NOISE_BANNER_TEXT "Iaculatores coniunctis: incesserit servitium castrensi post velut et deinde virgae."
+#define NOISE_CENTER_TEXT "Insulari sufficiente postulatus aut nullo delatus hostiles iniecto aut suos."
+#define NOISE_OBJECTIVE_TEXT "You are near an amazing place and everyone envy you."
+#define NOISE_VOTE_TEXT "Do you want cast a vote ?"
+
 void CG_HudEditor_Cleanup();
 
 qboolean CG_GetTag(int clientNum, const char *tagname, orientation_t *orientation);
@@ -2958,6 +2964,19 @@ void CG_DrawSkyBoxPortal(qboolean fLocalView);
 void CG_Letterbox(float xsize, float ysize, qboolean center);
 
 void CG_DrawLine(const vec3_t start, const vec3_t end, float width, const vec4_t color, qhandle_t shader);
+
+void CG_DrawChatLines(float chatPosX,
+                      float chatPosY,
+                      float chatWidth,
+                      int chatHeight,
+                      float lineHeight,
+                      float scale,
+                      float colorAlpha,
+                      float colorBgAlpha,
+                      int styleText,
+                      qboolean showFlag,
+                      qboolean fadeOut,
+                      qboolean fullLineBg);
 
 void CG_SetupDlightstyles(void);
 
@@ -3030,6 +3049,7 @@ void CG_InitStatsDebug(void);
 void CG_StatsDebugAddText(const char *text);
 void CG_DrawDebugArtillery(centity_t *cent);
 
+void CG_ComputeFPS(void);
 void CG_AddLagometerFrameInfo(void);
 void CG_AddLagometerSnapshotInfo(snapshot_t *snap);
 void CG_CenterPrint(const char *str);
@@ -4476,6 +4496,8 @@ void CG_DrawHelpWindow(float x, float y, int *status, const char *title, const h
 float CG_ComputeScale(hudComponent_t *comp /*, float height, float scale, fontHelper_t *font*/);
 
 void CG_DrawCursor(float x, float y);
+
+qhandle_t CG_GetTeamFlag(team_t team);
 
 void CG_DemoBackwardsCompatInit();
 #endif // #ifndef INCLUDE_CG_LOCAL_H
