@@ -642,7 +642,7 @@ typedef struct
 	int userSpawnPointValue;                            ///< index of objective to spawn nearest to (returned from UI)
 	int userMinorSpawnPointValue;                       ///< index of minor spawnpoint to spawn nearest to
 	int resolvedSpawnPointIndex;                        ///< most possible objective to spawn nearest to
-	int previousUserMinorSpawnPointValue;               ///< keeps track if minor spawn changed since last time
+	int resolvedMinorSpawnPointIndex;                   ///< most possible blob to spawn at
 	int latchPlayerType;                                ///< latched class
 	weapon_t latchPlayerWeapon;                         ///< latched primary weapon
 	weapon_t latchPlayerWeapon2;                        ///< latched secondary weapon
@@ -1194,6 +1194,12 @@ typedef struct spawnPointState_s
 	char description[128];
 } spawnPointState_t;
 
+typedef struct playerSpawn_s
+{
+	int major;
+	int minor;
+} playerSpawn_t;
+
 /**
  * @struct level_locals_s
  * @typedef level_locals_t
@@ -1407,7 +1413,8 @@ typedef struct level_locals_s
 	int demoClientsNum;        ///< number of reserved slots for demo clients
 	int demoClientBotNum;      ///< clientNum of bot that collects stats during recording, optional
 
-	uint64_t shoutcasters;     ///< clients bits of shoutcasters
+	uint64_t shoutcasters;     ///< shoutcasters, bitmask
+	int ebs_shoutcast[2];      ///< ebs shoutcast entities numbers
 } level_locals_t;
 
 /**
@@ -1577,7 +1584,7 @@ void G_ClientSound(gentity_t *ent, int soundIndex);
 void G_TouchTriggers(gentity_t *ent);
 
 void G_AddPredictableEvent(gentity_t *ent, int event, int eventParm);
-void G_AddEvent(gentity_t *ent, int event, int eventParm);
+void G_AddEvent(gentity_t *ent, int event, net_uint8_t eventParm);
 void G_SetOrigin(gentity_t *ent, vec3_t origin);
 void AddRemap(const char *oldShader, const char *newShader, float timeOffset);
 void G_ResetRemappedShaders(void);
@@ -2466,7 +2473,12 @@ void G_clientFlagIndicator(gentity_t *ent);
 qboolean G_EBS_ShoutcastCallback(int clientNumReal);
 void G_EBS_ShoutcastThink(gentity_t *ent);
 void G_EBS_InitShoutcast(void);
-ID_INLINE qboolean G_EBS_ShoutcastEnabled(void);
+qboolean G_EBS_ShoutcastEnabled(void);
+
+qboolean G_EBS_FireteamCallback(int entityNum, int clientNumReal);
+void G_EBS_FireteamThink(gentity_t *ent);
+void G_EBS_InitFireteam(void);
+qboolean G_EBS_FireteamEnabled(void);
 
 // g_vote.c
 int G_voteCmdCheck(gentity_t *ent, char *arg, char *arg2, qboolean fRefereeCmd);
