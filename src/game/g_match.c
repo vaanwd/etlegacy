@@ -301,18 +301,16 @@ void G_addStats(gentity_t *targ, gentity_t *attacker, int damage, meansOfDeath_t
 	{
 		if (attacker && attacker->client)
 		{
-			weapon_t weap = GetMODTableData(mod)->weaponIcon;
-
 			// don't count hits/shots for hitscan weapons
-			if (!GetWeaponTableData(weap)->splashDamage)
+			// Keep flamethrower out as well: it is not flagged explosive, but it
+			// has splash-like continuous damage and should not lose a shot for
+			// every corpse it touches.
+			if (!GetMODTableData(mod)->isExplosive && mod != MOD_FLAMETHROWER)
 			{
-				int x;
-
-				x = attacker->client->sess.aWeaponStats[GetMODTableData(mod)->indexWeaponStat].atts--;
-
-				if (x < 1)
+				// Only decrement if there is a shot to take back
+				if (attacker->client->sess.aWeaponStats[GetMODTableData(mod)->indexWeaponStat].atts > 0)
 				{
-					attacker->client->sess.aWeaponStats[GetMODTableData(mod)->indexWeaponStat].atts = 1;
+					attacker->client->sess.aWeaponStats[GetMODTableData(mod)->indexWeaponStat].atts--;
 				}
 			}
 
@@ -447,9 +445,6 @@ void G_createStatsJson(gentity_t *ent, void *target)
 	cJSON_AddNumberToObject(target, "rating1", ent->client->sess.mu - 3 * ent->client->sess.sigma);
 	cJSON_AddNumberToObject(target, "rating2", ent->client->sess.mu - 3 * ent->client->sess.sigma - (ent->client->sess.oldmu - 3 * ent->client->sess.oldsigma));
 #endif
-#ifdef FEATURE_PRESTIGE
-	cJSON_AddNumberToObject(target, "prestige", ent->client->sess.prestige);
-#endif
 
 	// workaround to always hide previous map stats in warmup
 	// Stats will be cleared correctly when the match actually starts
@@ -496,9 +491,13 @@ void G_createStatsJson(gentity_t *ent, void *target)
 
 	tmp = cJSON_AddObjectToObject(target, "skills");
 	// Add skill points as necessary
-	if (((g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_MAPVOTE || g_gametype.integer == GT_WOLF) && (g_xpSaver.integer & XPSF_ENABLE)) ||
-	    (g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
-	    (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0))
+	if (
+#ifdef FEATURE_XPSAVE
+		(g_gametype.integer == GT_WOLF_CAMPAIGN) ||
+		(g_xpSave.integer && (g_gametype.integer == GT_WOLF || g_gametype.integer == GT_WOLF_MAPVOTE)) ||
+#endif
+		(g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
+		(g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0))
 	{
 		for (i = SK_BATTLE_SENSE; i < SK_NUM_SKILLS; i++)
 		{
@@ -508,20 +507,6 @@ void G_createStatsJson(gentity_t *ent, void *target)
 			}
 		}
 	}
-#ifdef FEATURE_PRESTIGE
-	else if (g_prestige.integer && g_gametype.integer != GT_WOLF_CAMPAIGN && g_gametype.integer != GT_WOLF_STOPWATCH && g_gametype.integer != GT_WOLF_LMS)
-	{
-		for (i = SK_BATTLE_SENSE; i < SK_NUM_SKILLS; i++)
-		{
-			if (ent->client->sess.skillpoints[i] != 0.f) // Skillpoints can be negative
-			{
-				tmp2 = cJSON_AddObjectToObject(tmp, skillTable[i].skillNames);
-				cJSON_AddNumberToObject(tmp2, "skillPoints", (int)ent->client->sess.skillpoints[i]);
-				cJSON_AddNumberToObject(tmp2, "diff", (int)(ent->client->sess.skillpoints[i] - ent->client->sess.startskillpoints[i]));
-			}
-		}
-	}
-#endif
 	else
 	{
 		for (i = SK_BATTLE_SENSE; i < SK_NUM_SKILLS; i++)
@@ -593,9 +578,13 @@ char *G_createStats(gentity_t *ent)
 	}
 
 	// Add skillpoints as necessary
-	if (((g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH) && (g_xpSaver.integer & XPSF_ENABLE)) ||
-	    (g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
-	    (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0))
+	if (
+#ifdef FEATURE_XPSAVE
+		(g_gametype.integer == GT_WOLF_CAMPAIGN) ||
+		(g_xpSave.integer && (g_gametype.integer == GT_WOLF || g_gametype.integer == GT_WOLF_MAPVOTE)) ||
+#endif
+		(g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
+		(g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0))
 	{
 		for (i = SK_BATTLE_SENSE; i < SK_NUM_SKILLS; i++)
 		{
@@ -606,19 +595,6 @@ char *G_createStats(gentity_t *ent)
 			}
 		}
 	}
-#ifdef FEATURE_PRESTIGE
-	else if (g_prestige.integer && g_gametype.integer != GT_WOLF_CAMPAIGN && g_gametype.integer != GT_WOLF_STOPWATCH && g_gametype.integer != GT_WOLF_LMS)
-	{
-		for (i = SK_BATTLE_SENSE; i < SK_NUM_SKILLS; i++)
-		{
-			if (ent->client->sess.skillpoints[i] != 0.f) // Skillpoints can be negative
-			{
-				dwSkillPointMask |= (1 << i);
-				Q_strcat(strSkillInfo, sizeof(strSkillInfo), va(" %d %d", (int)ent->client->sess.skillpoints[i], (int)(ent->client->sess.skillpoints[i] - ent->client->sess.startskillpoints[i])));
-			}
-		}
-	}
-#endif
 	else
 	{
 		for (i = SK_BATTLE_SENSE; i < SK_NUM_SKILLS; i++)
@@ -643,12 +619,8 @@ char *G_createStats(gentity_t *ent)
 		strSkillInfo[0]  = '\0';
 	}
 
-#if defined(FEATURE_RATING) && defined (FEATURE_PRESTIGE)
-	return(va("%d %d %d%s %d%s %.2f %.2f %d",
-#elif defined(FEATURE_RATING)
+#if defined(FEATURE_RATING)
 	return(va("%d %d %d%s %d%s %.2f %.2f",
-#elif defined (FEATURE_PRESTIGE)
-	return(va("%d %d %d%s %d%s %d",
 #else
 	return (va("%d %d %d%s %d%s",
 #endif
@@ -662,10 +634,6 @@ char *G_createStats(gentity_t *ent)
 	          ,
 	          ent->client->sess.mu - 3 * ent->client->sess.sigma,
 	          ent->client->sess.mu - 3 * ent->client->sess.sigma - (ent->client->sess.oldmu - 3 * ent->client->sess.oldsigma)
-#endif
-#ifdef FEATURE_PRESTIGE
-	          ,
-	          ent->client->sess.prestige
 #endif
 	          ));
 }
@@ -700,9 +668,6 @@ void G_deleteStats(int nClient)
 	cl->sess.sigma    = SIGMA;
 	cl->sess.oldmu    = cl->sess.mu;
 	cl->sess.oldsigma = cl->sess.sigma;
-#endif
-#ifdef FEATURE_PRESTIGE
-	cl->sess.prestige = 0;
 #endif
 	cl->sess.startskillpoints[SK_BATTLE_SENSE]                             = 0;
 	cl->sess.startskillpoints[SK_EXPLOSIVES_AND_CONSTRUCTION]              = 0;
@@ -838,21 +803,21 @@ void G_printMatchInfo(gentity_t *ent)
 			continue;
 		}
 
-		tot_timex = 0;
-		tot_timel = 0;
-		tot_timep = 0;
-		tot_kills = 0;
+		tot_timex       = 0;
+		tot_timel       = 0;
+		tot_timep       = 0;
+		tot_kills       = 0;
 		tot_killassists = 0;
-		tot_deaths = 0;
-		tot_gibs = 0;
-		tot_sk = 0;
-		tot_tk = 0;
-		tot_tg = 0;
-		tot_dg = 0;
-		tot_dr = 0;
-		tot_tdg = 0;
-		tot_tdr = 0;
-		tot_xp = 0;
+		tot_deaths      = 0;
+		tot_gibs        = 0;
+		tot_sk          = 0;
+		tot_tk          = 0;
+		tot_tg          = 0;
+		tot_dg          = 0;
+		tot_dr          = 0;
+		tot_tdg         = 0;
+		tot_tdr         = 0;
+		tot_xp          = 0;
 
 		SMI("sc \"\n\"");
 #ifdef FEATURE_RATING
@@ -865,7 +830,7 @@ void G_printMatchInfo(gentity_t *ent)
 
 		for (j = 0; j < level.numConnectedClients; j++)
 		{
-			cl = level.clients + level.sortedClients[j];
+			cl     = level.clients + level.sortedClients[j];
 			cl_ent = g_entities + level.sortedClients[j];
 
 			if (cl->pers.connected != CON_CONNECTED || cl->sess.sessionTeam != i)
@@ -892,22 +857,22 @@ void G_printMatchInfo(gentity_t *ent)
 			Q_EscapeColorCodes(n2, '3');
 			namePadding = Q_CountPaddingWithColor(n2, SCORES_NAME_MAX_LEN);
 
-			ref = "^7";
-			tot_timex += cl->sess.time_axis;
-			tot_timel += cl->sess.time_allies;
-			tot_timep += cl->sess.time_played;
-			tot_kills += cl->sess.kills;
+			ref              = "^7";
+			tot_timex       += cl->sess.time_axis;
+			tot_timel       += cl->sess.time_allies;
+			tot_timep       += cl->sess.time_played;
+			tot_kills       += cl->sess.kills;
 			tot_killassists += cl->sess.kill_assists;
-			tot_deaths += cl->sess.deaths;
-			tot_gibs += cl->sess.gibs;
-			tot_sk += cl->sess.self_kills;
-			tot_tk += cl->sess.team_kills;
-			tot_tg += cl->sess.team_gibs;
-			tot_dg += cl->sess.damage_given;
-			tot_dr += cl->sess.damage_received;
-			tot_tdg += cl->sess.team_damage_given;
-			tot_tdr += cl->sess.team_damage_received;
-			tot_xp += (g_gametype.integer == GT_WOLF_LMS || g_gametype.integer == GT_WOLF_STOPWATCH) ? cl->ps.persistant[PERS_SCORE] : cl->ps.stats[STAT_XP];
+			tot_deaths      += cl->sess.deaths;
+			tot_gibs        += cl->sess.gibs;
+			tot_sk          += cl->sess.self_kills;
+			tot_tk          += cl->sess.team_kills;
+			tot_tg          += cl->sess.team_gibs;
+			tot_dg          += cl->sess.damage_given;
+			tot_dr          += cl->sess.damage_received;
+			tot_tdg         += cl->sess.team_damage_given;
+			tot_tdr         += cl->sess.team_damage_received;
+			tot_xp          += (g_gametype.integer == GT_WOLF_LMS || g_gametype.integer == GT_WOLF_STOPWATCH) ? cl->ps.persistant[PERS_SCORE] : cl->ps.stats[STAT_XP];
 
 			eff = (cl->sess.deaths + cl->sess.kills == 0) ? 0 : 100 * cl->sess.kills / (cl->sess.deaths + cl->sess.kills);
 			if (eff < 0)

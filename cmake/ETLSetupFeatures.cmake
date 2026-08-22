@@ -307,12 +307,12 @@ if(BUILD_MOD)
 		target_compile_definitions(mod_libraries INTERFACE FEATURE_MULTIVIEW)
 	endif()
 
-	if(FEATURE_RATING)
-		target_compile_definitions(mod_libraries INTERFACE FEATURE_RATING)
+	if(FEATURE_XPSAVE)
+		target_compile_definitions(mod_libraries INTERFACE FEATURE_XPSAVE)
 	endif()
 
-	if(FEATURE_PRESTIGE)
-		target_compile_definitions(mod_libraries INTERFACE FEATURE_PRESTIGE)
+	if(FEATURE_RATING)
+		target_compile_definitions(mod_libraries INTERFACE FEATURE_RATING)
 	endif()
 
 	if(FEATURE_LUA)

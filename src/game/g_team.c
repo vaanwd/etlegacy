@@ -1671,14 +1671,23 @@ void G_shuffleTeamsXP(void)
 #ifdef FEATURE_RATING
 /**
  * @brief Shuffle active players onto teams by skill rating
+ *
+ * @details Greedy draft: while players remain, the team with the fewest players
+ * gets the next pick. If both teams have the same number of players, the team
+ * with the lowest combined skill rating picks. When counts and ratings are tied,
+ * map bias decides: the best player goes to the weakest side. If the map bias is
+ * exactly 0.5 (no bias), the pick is chosen at random.
  */
 void G_shuffleTeamsSR(void)
 {
 	int       i;
-	team_t    cTeam; //, cMedian = level.numNonSpectatorClients / 2;
+	team_t    cTeam;
 	int       cnt = 0;
 	int       sortClients[MAX_CLIENTS];
 	int       mapBias = 0;
+	int       axisCount = 0, alliesCount = 0;
+	float     axisRating = 0.0f, alliesRating = 0.0f;
+	float     rating;
 	gclient_t *cl;
 
 	G_teamReset(TEAM_AXIS, qtrue);
@@ -1698,24 +1707,49 @@ void G_shuffleTeamsSR(void)
 
 	qsort(sortClients, cnt, sizeof(int), G_SortPlayersBySR);
 
-	// map bias check (1 = axis advantage)
+	// map bias check (1 = axis advantage, -1 = allies advantage, 0 = no bias)
 	if (g_skillRating.integer > 1)
 	{
-		mapBias = level.mapProb > 0.5f ? 1 : 0;
+		mapBias = (level.mapProb > 0.5f) - (level.mapProb < 0.5f);
 	}
 
 	for (i = 0; i < cnt; i++)
 	{
-		cl = level.clients + sortClients[i];
+		cl     = level.clients + sortClients[i];
+		rating = cl->sess.mu - 3.0f * cl->sess.sigma;
 
-		// put best rated player on weakest side
-		if (g_skillRating.integer > 1 && mapBias)
+		// pick priority: player count, then combined rating, then map bias, then random
+		if (axisCount != alliesCount)
 		{
-			cTeam = 3 - ((((i + 1) % 4) - ((i + 1) % 2)) / 2 + TEAM_AXIS);
+			cTeam = (axisCount < alliesCount) ? TEAM_AXIS : TEAM_ALLIES;
+		}
+		else if (axisRating != alliesRating)
+		{
+			cTeam = (axisRating < alliesRating) ? TEAM_AXIS : TEAM_ALLIES;
+		}
+		else if (mapBias == 1)
+		{
+			cTeam = TEAM_ALLIES;
+		}
+		else if (mapBias == -1)
+		{
+			cTeam = TEAM_AXIS;
 		}
 		else
 		{
-			cTeam = (((i + 1) % 4) - ((i + 1) % 2)) / 2 + TEAM_AXIS;
+			cTeam = (rand() % 2) ? TEAM_AXIS : TEAM_ALLIES;
+		}
+
+		// update team trackers
+		if (cTeam == TEAM_AXIS)
+		{
+			axisCount++;
+			axisRating += rating;
+		}
+		else
+		{
+			alliesCount++;
+			alliesRating += rating;
 		}
 
 		if (cl->sess.sessionTeam != cTeam)
@@ -2268,8 +2302,8 @@ static int G_ResolveSpawnPointIndex(team_t team, const vec_t *target_origin)
 }
 
 /**
- * @brief Finds suitable spawn point index for the given team.
- *        If auto selected spawn point is invalid, fallback to standard resolving method.
+ * @brief Return existing default spawn point for a team.
+ *				Can be inactive and doesn't have to belong to the team.
  * @param[in] team
  * @param[in] targetSpawnPt Player selected spawn point.
  * @return Spawn point index or -1.
@@ -2278,14 +2312,11 @@ static int G_ResolveAutoSpawnPointIndex(team_t team, int targetSpawnPt)
 {
 	if (targetSpawnPt >= 0 && targetSpawnPt < level.numSpawnPoints)
 	{
-		const spawnPointState_t *targetSpawnPointState = &level.spawnPointStates[targetSpawnPt];
-		// if this spawn point is already owned by the team, no further actions necessary
-		if (targetSpawnPointState->isActive && targetSpawnPointState->team == team)
-		{
-			return targetSpawnPt;
-		}
+		// if mapscript is set up incorrectly this spawn might not belong to the team or be inactive,
+		// in that case it should be resolved later
+		return targetSpawnPt;
 	}
-	// fallback:
+	// fallback, return any valid spawnpoint
 	return G_ResolveSpawnPointIndex(team, NULL);
 }
 
@@ -2326,13 +2357,13 @@ playerSpawn_t G_GetSpawnForClient(const gclient_t *client, const int resolvedAut
 		return (playerSpawn_t) { -1, -1 };
 	}
 	teamAutoSpawnPt = resolvedAutoSpawnPts[(client->sess.sessionTeam == TEAM_AXIS) ? 0 : 1];
-	// no spawn points are found for the given team
+	// no spawn points on the map
 	if (teamAutoSpawnPt == -1)
 	{
 		return (playerSpawn_t) { -1, -1 };
 	}
 	targetSpawnPt = G_ConvertToSpawnPointIndex(client->sess.userSpawnPointValue, teamAutoSpawnPt);
-	// selected spawn point is owned by the opposite team, find closest team spawn point
+	// selected spawn point is owned by the opposite team or is inactive, find the closest team spawn point
 	if (level.spawnPointStates[targetSpawnPt].team != client->sess.sessionTeam ||
 	    level.spawnPointStates[targetSpawnPt].isActive != 1)
 	{

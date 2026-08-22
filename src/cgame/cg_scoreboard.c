@@ -35,6 +35,9 @@
 
 #include "cg_local.h"
 
+#include <math.h>
+#include <time.h>
+
 char *Binding_FromName(const char *cvar);
 
 // colors and fonts for overlays
@@ -376,8 +379,42 @@ int WM_DrawObjectives(int x, int y, int width, float fade)
 		case GT_WOLF_CAMPAIGN:
 			s = va(CG_TranslateString("MAP %i of %i"), cgs.currentCampaignMap + 1, cgs.campaignData.mapCount);
 			break;
+		case GT_WOLF:
 		case GT_WOLF_MAPVOTE:
-			s = (cgs.mapVoteMapY ? va(CG_TranslateString("MAP %i of %i"), cgs.mapVoteMapX + 1, cgs.mapVoteMapY) : "MAP");
+#ifdef FEATURE_XPSAVE
+			if (cgs.xpSaveResetMode == 1 && cgs.xpSaveResetThreshold > 0)
+			{
+				s = va(CG_TranslateString("MAP %i of %i"), cgs.xpSaveResetValue + 1, cgs.xpSaveResetThreshold);
+			}
+			else if (cgs.xpSaveResetMode == 2 && cgs.xpSaveResetThreshold > 0)
+			{
+				time_t now        = time(NULL);
+				time_t last_reset = (time_t)cgs.xpSaveResetValue;
+				int    remaining  = cgs.xpSaveResetThreshold * 3600 - (int)difftime(now, last_reset);
+				int    hours, minutes;
+
+				if (remaining < 0)
+				{
+					remaining = 0;
+				}
+
+				hours   = remaining / 3600;
+				minutes = (remaining % 3600) / 60;
+
+				s = va(CG_TranslateString("XP RESET IN %ih %im"), hours, minutes);
+			}
+			else if (cgs.xpSaveResetMode == 3 && cgs.xpSaveResetThreshold > 0)
+			{
+				int halfLife = cgs.xpSaveResetThreshold;
+				int dailyPct = (int)round((1.0 - pow(0.5, 1.0 / halfLife)) * 100.0);
+
+				s = va(CG_TranslateString("XP DECAY %i%%/DAY (λ %iD)"), dailyPct, halfLife);
+			}
+			else
+#endif
+			{
+				s = "MAP";
+			}
 			break;
 		default:
 			s = "MAP";
@@ -589,13 +626,6 @@ static void WM_DrawClientScore_Score(int x, int y, float scaleX, float scaleY, c
 	if (cgs.skillRating && cg_scoreboard.integer == SCOREBOARD_SR)
 	{
 		CG_Text_Paint_RightAligned_Ext(x, y, scaleX, scaleY, colorWhite, va("^7%5.2f", (double) Com_RoundFloatWithNDecimal(score->rating, 2)), 0, 0, ITEM_TEXTSTYLE_SHADOWED, FONT_TEXT);
-	}
-	else
-#endif
-#ifdef FEATURE_PRESTIGE
-	if (cgs.prestige && cg_scoreboard.integer == SCOREBOARD_PR)
-	{
-		CG_Text_Paint_RightAligned_Ext(x, y, scaleX, scaleY, colorWhite, va("^7%6i", score->prestige), 0, 0, ITEM_TEXTSTYLE_SHADOWED, FONT_TEXT);
 	}
 	else
 #endif
@@ -1043,16 +1073,6 @@ static int WM_TeamScoreboard(int x, int y, team_t team, float fade, int maxrows,
 			}
 			else
 #endif
-#ifdef FEATURE_PRESTIGE
-			if (cgs.prestige && cg_scoreboard.integer == SCOREBOARD_PR)
-			{
-				s = va("%s (%d %s)", CG_TranslateString(teamText), cg.teamPlayers[team], cg.teamPlayers[team] < 2 ? CG_TranslateString("PLAYER") : CG_TranslateString("PLAYERS"));
-
-				s2 = va("%s", CG_TranslateString("PRESTIGE"));
-				CG_Text_Paint_Ext(x + width - 5 - CG_Text_Width_Ext(s2, 0.19f, 0, FONT_HEADER), y + 13, 0.19f, 0.19f, SB_text, s2, 0, 0, 0, FONT_HEADER);
-			}
-			else
-#endif
 			{
 				s = va("%s [%d] (%d %s)", CG_TranslateString(teamText), cg.teamScores[team - 1], cg.teamPlayers[team], cg.teamPlayers[team] < 2 ? CG_TranslateString("PLAYER") : CG_TranslateString("PLAYERS"));
 
@@ -1102,13 +1122,6 @@ static int WM_TeamScoreboard(int x, int y, team_t team, float fade, int maxrows,
 		if (cgs.skillRating && cg_scoreboard.integer == SCOREBOARD_SR)
 		{
 			CG_Text_Paint_RightAligned_Ext(tempx, y + 13, 0.24f, 0.28f, colorWhite, "SR", 0, 0, ITEM_TEXTSTYLE_SHADOWED, FONT_TEXT);
-		}
-		else
-#endif
-#ifdef FEATURE_PRESTIGE
-		if (cgs.prestige && cg_scoreboard.integer == SCOREBOARD_PR)
-		{
-			CG_DrawPic(tempx - 14, y + 2, 14, 14, cgs.media.prestigePics[0]);
 		}
 		else
 #endif
@@ -1270,7 +1283,7 @@ qboolean CG_DrawScoreboard(void)
 	int   x = 20, y = 6, x_right = SCREEN_WIDTH - x - (INFO_TOTAL_WIDTH - 5);
 	float fade;
 	int   width = SCREEN_WIDTH - 2 * x + 5;
-#if defined(FEATURE_RATING) || defined(FEATURE_PRESTIGE)
+#if defined(FEATURE_RATING)
 	int        w;
 	const char *s, *s2, *s3;
 #endif
@@ -1354,18 +1367,10 @@ qboolean CG_DrawScoreboard(void)
 	x = x_right;
 	WM_TeamScoreboard(x, y, TEAM_ALLIES, fade, maxrows, use_mini_chars);
 
-#if defined(FEATURE_RATING) || defined(FEATURE_PRESTIGE)
+#if defined(FEATURE_RATING)
 	if (cgs.gamestate != GS_INTERMISSION &&
 		(
-#if defined(FEATURE_RATING)
 			cgs.skillRating
-#endif
-#if defined(FEATURE_RATING) && defined(FEATURE_PRESTIGE)
-			||
-#endif
-#if defined(FEATURE_PRESTIGE)
-			cgs.prestige
-#endif
 	    ))
 	{
 		s2 = Binding_FromName("+scores");
@@ -1378,13 +1383,6 @@ qboolean CG_DrawScoreboard(void)
 		if (cgs.skillRating && cg_scoreboard.integer == SCOREBOARD_SR) // Skill Rating
 		{
 			s3 = CG_TranslateString("Skill Rating view");
-		}
-		else
-#endif
-#ifdef FEATURE_PRESTIGE
-		if (cgs.prestige && cg_scoreboard.integer == SCOREBOARD_PR)
-		{
-			s3 = CG_TranslateString("Prestige view");
 		}
 		else
 #endif

@@ -620,9 +620,6 @@ typedef struct
 	// skill rating
 	float rating;
 #endif
-#ifdef FEATURE_PRESTIGE
-	int prestige;
-#endif
 } score_t;
 
 /**
@@ -663,9 +660,6 @@ typedef struct clientInfo_s
 	int medals[SK_NUM_SKILLS];
 	int skill[SK_NUM_SKILLS];
 	int skillpoints[SK_NUM_SKILLS];      ///< filled OOB by +wstats
-#ifdef FEATURE_PRESTIGE
-	int deltaskillpoints[SK_NUM_SKILLS];
-#endif
 
 	int disguiseClientNum;
 
@@ -712,9 +706,6 @@ typedef struct clientInfo_s
 	float deltaRating;
 #endif
 
-#ifdef FEATURE_PRESTIGE
-	int prestige;
-#endif
 	int ammo;
 	int ammoclip;
 #ifdef FEATURE_MULTIVIEW
@@ -1588,7 +1579,7 @@ typedef struct
 	int redFlagCounter;
 	int blueFlagCounter;
 
-#if defined(FEATURE_RATING) || defined(FEATURE_PRESTIGE)
+#if defined(FEATURE_RATING)
 	// scoreboard
 	int scoresDownTime;
 	int scoreToggleTime;
@@ -1602,10 +1593,6 @@ typedef struct
 	float rating[MAX_CLIENTS];
 	float axisProb;
 	float alliesProb;
-#endif
-
-#ifdef FEATURE_PRESTIGE
-	int prestige[MAX_CLIENTS];
 #endif
 
 	// banner printing
@@ -1942,9 +1929,6 @@ typedef struct
 	qhandle_t ccAmmoIcon;
 	qhandle_t ccVoiceChatShader;
 	qhandle_t ccVoiceChatOrangeShader;
-#ifdef FEATURE_PRESTIGE
-	qhandle_t prestigePics[3];
-#endif
 	qhandle_t ccMortarHit;
 	qhandle_t ccMortarTarget;
 	qhandle_t mortarTarget;
@@ -2234,9 +2218,8 @@ enum
 // Big popup filters
 enum
 {
-	POPUP_BIG_FILTER_SKILL    = BIT(0),
-	POPUP_BIG_FILTER_RANK     = BIT(1),
-	POPUP_BIG_FILTER_PRESTIGE = BIT(2),
+	POPUP_BIG_FILTER_SKILL = BIT(0),
+	POPUP_BIG_FILTER_RANK  = BIT(1),
 };
 
 // Popup XP Gain
@@ -2381,14 +2364,10 @@ typedef struct
 	float lastZ;
 } clientLocation_t;
 
-#if defined(FEATURE_RATING) && defined(FEATURE_PRESTIGE)
-#define NUM_ENDGAME_AWARDS     23   ///< total number of endgame awards
-#else
-#if defined(FEATURE_RATING) || defined(FEATURE_PRESTIGE)
+#if defined(FEATURE_RATING)
 #define NUM_ENDGAME_AWARDS     22   ///< total number of endgame awards
 #else
 #define NUM_ENDGAME_AWARDS     21   ///< total number of endgame awards
-#endif
 #endif
 #define NUMSHOW_ENDGAME_AWARDS 14   ///< number of awards to display that will fit on screen
 
@@ -2728,9 +2707,6 @@ typedef struct cgs_s
 #ifdef FEATURE_RATING
 	qboolean dbSkillRatingReceived;
 #endif
-#ifdef FEATURE_PRESTIGE
-	qboolean dbPrestigeReceived;
-#endif
 	qboolean dbWeaponStatsReceived;
 	qboolean dbLastScoreReceived;
 	qboolean dbAwardsParsed;
@@ -2799,18 +2775,18 @@ typedef struct cgs_s
 	qboolean dbMapMultiVote;
 	int dbMapVotedFor[3];
 	sortedVotedMapByTotal_s dbSortedVotedMapsByTotal[MAX_VOTE_MAPS];
-	int mapVoteMapX;
-	int mapVoteMapY;
 
 	int fixedphysics;
 	int fixedphysicsfps;
 	int pronedelay;
+#ifdef FEATURE_XPSAVE
+	int xpSaveResetValue;
+	int xpSaveResetThreshold;
+	int xpSaveResetMode;
+#endif
 #ifdef FEATURE_RATING
 	int skillRating;
 	float mapProb;
-#endif
-#ifdef FEATURE_PRESTIGE
-	int prestige;
 #endif
 #ifdef FEATURE_MULTIVIEW
 	int mvAllowed;
@@ -2870,8 +2846,7 @@ enum
 {
 	CROSSHAIR_BAR_CLASS         = BIT(0),
 	CROSSHAIR_BAR_RANK          = BIT(1),
-	CROSSHAIR_BAR_PRESTIGE      = BIT(2),
-	CROSSHAIR_BAR_DYNAMIC_COLOR = BIT(3),
+	CROSSHAIR_BAR_DYNAMIC_COLOR = BIT(2),
 };
 
 // projectile spawn effects at destination
@@ -3905,11 +3880,6 @@ void CG_LimboPanel_RenderMedal(panel_button_t *button);
 void CG_LimboPanel_RenderCounter(panel_button_t *button);
 void CG_LimboPanelRenderText_NoLMS(panel_button_t *button);
 void CG_LimboPanelRenderText_SkillsText(panel_button_t *button);
-#ifdef FEATURE_PRESTIGE
-void CG_LimboPanel_RenderPrestige(panel_button_t *button);
-void CG_LimboPanel_RenderPrestigeIcon(panel_button_t *button);
-void CG_LimboPanel_Prestige_Draw(panel_button_t *button);
-#endif
 
 void CG_LimboPanel_NameEditFinish(panel_button_t *button);
 
@@ -4009,16 +3979,14 @@ void CG_Debriefing_VoteNowButton_Draw(panel_button_t *button);
 void CG_Debriefing_NextButton_Draw(panel_button_t *button);
 void CG_Debriefing_ChatButton_Draw(panel_button_t *button);
 void CG_Debriefing_ReadyButton_Draw(panel_button_t *button);
-#ifdef FEATURE_PRESTIGE
-void CG_Debriefing_PrestigeButton_Draw(panel_button_t *button);
-#endif
 qboolean CG_Debriefing_ChatButton_KeyDown(panel_button_t *button, int key);
 qboolean CG_Debriefing_ReadyButton_KeyDown(panel_button_t *button, int key);
 qboolean CG_Debriefing_QCButton_KeyDown(panel_button_t *button, int key);
 qboolean CG_Debriefing_PanelButton_KeyDown(panel_button_t *button, int key);
 qboolean CG_Debriefing_NextButton_KeyDown(panel_button_t *button, int key);
-#ifdef FEATURE_PRESTIGE
-qboolean CG_Debriefing_PrestigeButton_KeyDown(panel_button_t *button, int key);
+#ifdef FEATURE_XPSAVE
+qboolean CG_Debriefing_XPSaveResetButton_KeyDown(panel_button_t *button, int key);
+void CG_Debriefing_XPSaveResetButton_Draw(panel_button_t *button);
 #endif
 
 void CG_PanelButtonsRender_Button_Ext(rectDef_t *r, const char *text);
@@ -4034,10 +4002,6 @@ void CG_Debriefing_PlayerSR_Draw(panel_button_t *button);
 void CG_Debriefing_PlayerACC_Draw(panel_button_t *button);
 void CG_Debriefing_PlayerHS_Draw(panel_button_t *button);
 void CG_Debriefing_PlayerSkills_Draw(panel_button_t *button);
-#ifdef FEATURE_PRESTIGE
-void CG_Debriefing_PlayerPrestige_Draw(panel_button_t *button);
-void CG_Debriefing_PlayerPrestige_Note(panel_button_t *button);
-#endif
 void CG_Debriefing_PlayerHitRegions_Draw(panel_button_t *button);
 
 void CG_DebriefingPlayerWeaponStats_Draw(panel_button_t *button);
@@ -4067,9 +4031,6 @@ void CG_Debriefing_ParsePlayerKillsDeaths(qboolean secondPart);
 void CG_Debriefing_ParsePlayerTime(void);
 void CG_Debriefing_ParseAwards(void);
 void CG_Debriefing_ParseSkillRating(void);
-#ifdef FEATURE_PRESTIGE
-void CG_Debriefing_ParsePrestige(void);
-#endif
 
 void CG_TeamDebriefingTeamSkillXP_Draw(panel_button_t *button);
 
@@ -4251,29 +4212,30 @@ typedef struct hudStructure_s
 	char parent[MAX_QPATH];
 	qboolean isEditable;
 
+	// 1
 	hudComponent_t compass;
 	hudComponent_t staminabar;
 	hudComponent_t breathbar;
 	hudComponent_t healthbar;
 	hudComponent_t weaponchargebar;
+	hudComponent_t clipbar;
 	hudComponent_t healthtext;
 	hudComponent_t xptext;
 	hudComponent_t ranktext;
-	hudComponent_t statsdisplay;
 	// 10
+	hudComponent_t statsdisplay;
 	hudComponent_t weaponheatbar;
 	hudComponent_t weaponicon;
 	hudComponent_t weaponammo;
-	hudComponent_t clipbar;
 	hudComponent_t fireteam;
 	hudComponent_t popupmessages;
 	hudComponent_t popupmessages2;
 	hudComponent_t popupmessages3;
 	hudComponent_t popupmessages4;
 	hudComponent_t powerups;
+	// 20
 	hudComponent_t objectives;
 	hudComponent_t hudhead;
-	// 20
 	hudComponent_t cursorhints;
 	hudComponent_t cursorhintsbar;
 	hudComponent_t cursorhintstext;
@@ -4281,10 +4243,10 @@ typedef struct hudStructure_s
 	hudComponent_t livesleft;
 	hudComponent_t roundtimer;
 	hudComponent_t reinforcement;
+	// 30
 	hudComponent_t spawntimer;
 	hudComponent_t localtime;
 	hudComponent_t votetext;
-	// 30
 	hudComponent_t spectatortext;
 	hudComponent_t limbotext;
 	hudComponent_t followtext;
@@ -4292,10 +4254,10 @@ typedef struct hudStructure_s
 	hudComponent_t missilecamera;
 	hudComponent_t sprinttext;
 	hudComponent_t breathtext;
+	// 40
 	hudComponent_t weaponchargetext;
 	hudComponent_t fps;
 	hudComponent_t snapshot;
-	// 40
 	hudComponent_t ping;
 	hudComponent_t speed;
 	hudComponent_t lagometer;
@@ -4304,9 +4266,9 @@ typedef struct hudStructure_s
 	hudComponent_t spectatorstatus;
 	hudComponent_t pmitemsbig;
 	hudComponent_t warmuptitle;
+	// 50
 	hudComponent_t warmuptext;
 	hudComponent_t objectivetext;
-	// 50
 	hudComponent_t centerprint;
 	hudComponent_t banner;
 	hudComponent_t crosshair;
@@ -4326,7 +4288,7 @@ typedef struct hudStructure_s
 
 #define MAXHUDS 32
 #define MAXSTYLES 24
-#define CURRENT_HUD_JSON_VERSION 7
+#define CURRENT_HUD_JSON_VERSION 8
 #define DEFAULTHUD "ETmain"
 
 typedef struct
@@ -4500,6 +4462,8 @@ float CG_ComputeScale(hudComponent_t *comp /*, float height, float scale, fontHe
 void CG_DrawCursor(float x, float y);
 
 qhandle_t CG_GetTeamFlag(team_t team);
+
+char *CG_GetClientNameString(int clientNum, qboolean isFullcolor);
 
 void CG_DemoBackwardsCompatInit();
 #endif // #ifndef INCLUDE_CG_LOCAL_H

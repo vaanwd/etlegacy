@@ -177,8 +177,10 @@ typedef struct
 	int timeAllies;
 	int timePlayed;
 
+#ifdef FEATURE_RATING
 	float rating;
 	float deltaRating;
+#endif
 
 	int kills;
 	int killsAssists;
@@ -203,8 +205,10 @@ static void CG_BackupPlayerStats(statBackup_t *statBackup, const clientInfo_t *c
 	statBackup->timeAllies = ci->timeAllies;
 	statBackup->timePlayed = ci->timePlayed;
 
+#ifdef FEATURE_RATING
 	statBackup->rating      = ci->rating;
 	statBackup->deltaRating = ci->deltaRating;
+#endif
 
 	statBackup->kills        = ci->kills;
 	statBackup->killsAssists = ci->killsAssists;
@@ -229,8 +233,10 @@ static void CG_RestorePlayerStats(const statBackup_t *statBackup, clientInfo_t *
 	ci->timeAllies = statBackup->timeAllies;
 	ci->timePlayed = statBackup->timePlayed;
 
+#ifdef FEATURE_RATING
 	ci->rating      = statBackup->rating;
 	ci->deltaRating = statBackup->deltaRating;
+#endif
 
 	ci->kills        = statBackup->kills;
 	ci->killsAssists = statBackup->killsAssists;
@@ -312,12 +318,6 @@ void CG_NewClientInfo(int clientNum)
 	// rank
 	v            = Info_ValueForKey(configstring, "r");
 	newInfo.rank = Q_atoi(v);
-
-#ifdef FEATURE_PRESTIGE
-	// prestige
-	v                = Info_ValueForKey(configstring, "p");
-	newInfo.prestige = Q_atoi(v);
-#endif
 
 	// fireteam
 	v                = Info_ValueForKey(configstring, "f");
@@ -474,61 +474,6 @@ void CG_NewClientInfo(int clientNum)
 						CG_PriorityCenterPrint(va(CG_TranslateString("You have been rewarded with %s"), CG_TranslateString(cg_skillRewards[i][newInfo.skill[i] - 1])), 99999);
 					}
 				}
-
-#ifdef FEATURE_PRESTIGE
-				if (cgs.prestige && cgs.gametype != GT_WOLF_STOPWATCH && cgs.gametype != GT_WOLF_LMS && cgs.gametype != GT_WOLF_CAMPAIGN)
-				{
-					int j;
-					int skillMax = 0, cnt = 0;
-
-					// check skill max level
-					for (j = NUM_SKILL_LEVELS - 1; j >= 0; j--)
-					{
-						if (GetSkillTableData(i)->skillLevels[j] >= 0)
-						{
-							skillMax = j;
-							break;
-						}
-					}
-
-					if (newInfo.skill[i] == skillMax)
-					{
-						// count the number of maxed out skills
-						for (j = 0; j < SK_NUM_SKILLS; j++)
-						{
-							int k;
-							skillMax = 0;
-
-							// check skill max level
-							for (k = NUM_SKILL_LEVELS - 1; k >= 0; k--)
-							{
-								if (GetSkillTableData(j)->skillLevels[k] >= 0)
-								{
-									skillMax = k;
-									break;
-								}
-							}
-
-							if (cgs.clientinfo[cg.clientNum].skill[j] >= skillMax)
-							{
-								cnt++;
-							}
-						}
-
-						if (!(CG_GetActiveHUD()->pmitemsbig.style & POPUP_BIG_FILTER_PRESTIGE))
-						{
-							if (cnt < SK_NUM_SKILLS)
-							{
-								CG_AddPMItemBig(PM_PRESTIGE, va(CG_TranslateString("Prestige point progression: %i/7"), cnt), cgs.media.prestigePics[1]);
-							}
-							else
-							{
-								CG_AddPMItemBig(PM_PRESTIGE, CG_TranslateString("Prestige point ready to be collected!"), cgs.media.prestigePics[2]);
-							}
-						}
-					}
-				}
-#endif
 			}
 		}
 
@@ -2316,7 +2261,7 @@ static void CG_PlayerSprites(centity_t *cent)
 
 		if (cg_drawSpectatorNames.integer > 0)
 		{
-			name = cg_drawSpectatorNames.integer == 1 ? ci->cleanname : ci->name;
+			name = CG_GetClientNameString(cent->currentState.clientNum, cg_drawSpectatorNames.integer);
 
 			if (cg_shoutcastDrawHealth.integer == 1 && cgs.clientinfo[cg.clientNum].shoutcaster)
 			{
@@ -2353,7 +2298,7 @@ static void CG_PlayerSprites(centity_t *cent)
 
 	if (cg.demoPlayback && cg_drawSpectatorNames.integer > 0)
 	{
-		CG_PlayerFloatText(cent, cg_drawSpectatorNames.integer == 1 ? ci->cleanname : ci->name, height + 8);
+		CG_PlayerFloatText(cent, CG_GetClientNameString(cent->currentState.clientNum, cg_drawSpectatorNames.integer == 1), height + 8);
 	}
 
 	if (cent->currentState.powerups & (1 << PW_INVULNERABLE))

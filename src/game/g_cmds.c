@@ -312,42 +312,6 @@ static void G_SendSkillRating(gentity_t *ent)
 }
 #endif
 
-#ifdef FEATURE_PRESTIGE
-/**
- * @brief G_SendPrestige
- * @param[in] ent
- */
-static void G_SendPrestige(gentity_t *ent)
-{
-	char      buffer[1024];
-	int       i, clientNum;
-	gclient_t *cl;
-
-	if (!ent || !ent->client)
-	{
-		return;
-	}
-
-	trap_Argv(1, buffer, sizeof(buffer));
-
-	clientNum = Q_atoi(buffer);
-	if (clientNum < 0 || clientNum > g_maxclients.integer)
-	{
-		return;
-	}
-
-	Q_strncpyz(buffer, "pr ", sizeof(buffer));
-
-	for (i = 0; i < level.numConnectedClients; i++)
-	{
-		cl = &level.clients[level.sortedClients[i]];
-		Q_strcat(buffer, sizeof(buffer), va("%i ", cl->sess.prestige));
-	}
-
-	trap_SendServerCommand(ent - g_entities, buffer);
-}
-#endif
-
 /**
  * @brief Add score with clientNum at index i of level.sortedClients[] to the string buf.
  *
@@ -400,9 +364,13 @@ qboolean G_SendScore_Add(gentity_t *ent, int i, char *buf, int bufsize)
 	{
 		int j;
 
-		if (((g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_MAPVOTE || g_gametype.integer == GT_WOLF) && (g_xpSaver.integer & XPSF_ENABLE)) ||
-		    (g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
-		    (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0))
+		if (
+#ifdef FEATURE_XPSAVE
+			(g_gametype.integer == GT_WOLF_CAMPAIGN) ||
+			(g_xpSave.integer && (g_gametype.integer == GT_WOLF || g_gametype.integer == GT_WOLF_MAPVOTE)) ||
+#endif
+			(g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
+			(g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0))
 		{
 			for (j = SK_BATTLE_SENSE; j < SK_NUM_SKILLS; j++)
 			{
@@ -472,13 +440,6 @@ void G_SendScore(gentity_t *ent)
 	if (g_skillRating.integer)
 	{
 		G_SendSkillRating(ent);
-	}
-#endif
-
-#ifdef FEATURE_PRESTIGE
-	if (g_prestige.integer)
-	{
-		G_SendPrestige(ent);
 	}
 #endif
 
@@ -4940,6 +4901,61 @@ void Cmd_IntermissionPlayerTime_f(gentity_t *ent, unsigned int dwCommand, int va
 	trap_SendServerCommand(ent - g_entities, buffer);
 }
 
+#ifdef FEATURE_XPSAVE
+/**
+ * @brief Cmd_IntermissionXPSaveReset_f
+ * @param[in,out] ent
+ * @param dwCommand - unused
+ * @param value    - unused
+ */
+void Cmd_IntermissionXPSaveReset_f(gentity_t *ent, unsigned int dwCommand, int value)
+{
+	char userinfo[MAX_INFO_STRING];
+	char *guid;
+	int i;
+	gclient_t *cl;
+
+	if (!ent || !ent->client)
+	{
+		return;
+	}
+
+	if (!g_xpSave.integer)
+	{
+		return;
+	}
+
+	if (g_gametype.integer != GT_WOLF && g_gametype.integer != GT_WOLF_MAPVOTE)
+	{
+		return;
+	}
+
+	cl = ent->client;
+
+	trap_GetUserinfo(ent - g_entities, userinfo, sizeof(userinfo));
+	guid = Info_ValueForKey(userinfo, "cl_guid");
+
+	if (G_XPSave_Reset((const unsigned char *)guid) != 0)
+	{
+		return;
+	}
+
+	// reset current session xp so the debriefing display updates immediately
+	Com_Memset(cl->sess.skillpoints, 0, sizeof(cl->sess.skillpoints));
+	Com_Memset(cl->sess.startskillpoints, 0, sizeof(cl->sess.startskillpoints));
+	Com_Memset(cl->sess.medals, 0, sizeof(cl->sess.medals));
+	cl->sess.startxptotal = 0;
+	cl->sess.rank         = 0;
+
+	for (i = 0; i < SK_NUM_SKILLS; i++)
+	{
+		cl->sess.skill[i] = 0;
+	}
+
+	trap_SendServerCommand(ent - g_entities, "print \"XP save data reset.\\n\"");
+}
+#endif
+
 #ifdef FEATURE_RATING
 /**
  * @brief Cmd_IntermissionSkillRating_f
@@ -4983,79 +4999,38 @@ void Cmd_IntermissionSkillRating_f(gentity_t *ent, unsigned int dwCommand, int v
 }
 #endif
 
-#ifdef FEATURE_PRESTIGE
 /**
- * @brief Cmd_IntermissionPrestige_f
- * @param[in] ent
- * @param dwCommand - unused
- * @param value    - unused
+ * @brief G_AccuracyScore
+ * @param[in] hits
+ * @param[in] shots
+ * @return Accuracy score in percent, used to rank accuracy-based awards fairly across sample sizes.
+ *         Small sample sizes are penalized, so a player can't win the accuracy award on a few lucky shots.
+ * @note Currently implemented as the lower bound of the 95% Wilson score confidence interval for hits/shots,
+ *       with continuity correction to further penalize very small sample sizes.
  */
-void Cmd_IntermissionPrestige_f(gentity_t *ent, unsigned int dwCommand, int value)
+static float G_AccuracyScore(int hits, int shots)
 {
-	char buffer[1024];
-	int i;
-	gclient_t *cl;
+	const float z = 1.96f;
+	float n, phat, zz, radicand, correction;
 
-	if (!ent || !ent->client)
+	if (hits <= 0 || shots <= 0)
 	{
-		return;
+		return 0.f;
 	}
 
-	if (!g_prestige.integer)
-	{
-		return;
-	}
+	n  = (float)shots;
+	zz = z * z;
 
-	Q_strncpyz(buffer, "impr ", sizeof(buffer));
-	for (i = 0; i < g_maxclients.integer; i++)
-	{
-		if (g_entities[i].inuse)
-		{
-			cl = &level.clients[i];
-			Q_strcat(buffer, sizeof(buffer), va("%i ", cl->sess.prestige));
-		}
-		else
-		{
-			Q_strcat(buffer, sizeof(buffer), "0 ");
-		}
-	}
+	// hits and shots are accumulated from different counters (damage vs firing events),
+	// so clamp the ratio in case hits ever exceed shots
+	phat = Com_Clamp(0.f, 1.f, hits / n);
 
-	trap_SendServerCommand(ent - g_entities, buffer);
+	// w = [2*n*p + z^2 - (z * sqrt(z^2 - 1/n + 4*n*p*(1-p) + (4*p-2)) + 1)] / [2*(n + z^2)]
+	radicand   = zz - 1.f / n + 4.f * n * phat * (1.f - phat) + (4.f * phat - 2.f);
+	correction = z * sqrt(radicand) + 1.f;
+
+	return 100.f * (2.f * n * phat + zz - correction) / (2.f * (n + zz));
 }
-
-/**
- * @brief Cmd_IntermissionCollectPrestige_f
- * @param[in,out] ent
- * @param dwCommand - unused
- * @param value    - unused
- */
-void Cmd_IntermissionCollectPrestige_f(gentity_t *ent, unsigned int dwCommand, int value)
-{
-	if (!ent || !ent->client)
-	{
-		return;
-	}
-
-	if (g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_LMS)
-	{
-		trap_SendServerCommand(ent - g_entities, "print \"'imcollectpr' not allowed during current gametype!\n\"");
-		return;
-	}
-
-	if (!g_prestige.integer)
-	{
-		return;
-	}
-
-	if (g_gamestate.integer != GS_INTERMISSION)
-	{
-		trap_SendServerCommand(ent - g_entities, "print \"'imcollectpr' only allowed during intermission!\n\"");
-		return;
-	}
-
-	G_SetClientPrestige(ent->client, qfalse);
-}
-#endif
 
 /**
  * @brief G_CalcClientAccuracies
@@ -5086,13 +5061,17 @@ void G_CalcClientAccuracies(void)
 				headshots += level.clients[i].sess.aWeaponStats[j].headshots;
 			}
 
-			level.clients[i].acc   = shots ? 100 * hits / (float)shots : 0.f;
-			level.clients[i].hspct = hits ? 100 * headshots / (float)hits : 0.f;
+			level.clients[i].acc      = shots ? 100 * hits / (float)shots : 0.f;
+			level.clients[i].hspct    = hits ? 100 * headshots / (float)hits : 0.f;
+			level.clients[i].accscore = G_AccuracyScore(hits, shots);
+			level.clients[i].hsscore  = G_AccuracyScore(headshots, hits);
 		}
 		else
 		{
-			level.clients[i].acc   = 0.f;
-			level.clients[i].hspct = 0.f;
+			level.clients[i].acc      = 0.f;
+			level.clients[i].hspct    = 0.f;
+			level.clients[i].accscore = 0.f;
+			level.clients[i].hsscore  = 0.f;
 		}
 	}
 }

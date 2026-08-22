@@ -12,9 +12,7 @@
 #include "g_lua.h"
 
 #ifdef FEATURE_LUASQL
-#include "../../vendor/luasql/luasql.h"
-#include "../../vendor/luasql/luasql.c"
-#include "../../vendor/luasql/ls_sqlite3.c"
+#include "luasql.h"
 #endif
 
 #ifdef FEATURE_LUAJIT
@@ -1345,9 +1343,6 @@ static const gentity_field_t gclient_fields[] =
 	_et_gclient_addfield(sess.sigma,                        FIELD_FLOAT,               FIELD_FLAG_READONLY),
 	_et_gclient_addfield(sess.oldmu,                        FIELD_FLOAT,               FIELD_FLAG_READONLY),
 	_et_gclient_addfield(sess.oldsigma,                     FIELD_FLOAT,               FIELD_FLAG_READONLY),
-#endif
-#ifdef FEATURE_PRESTIGE
-	_et_gclient_addfield(sess.prestige,                     FIELD_INT,                 FIELD_FLAG_READONLY),
 #endif
 	_et_gclient_addfield(sess.uci,                          FIELD_INT,                 0),
 

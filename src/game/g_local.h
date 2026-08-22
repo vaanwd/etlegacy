@@ -681,9 +681,6 @@ typedef struct
 	float oldmu;
 	float oldsigma;
 #endif
-#ifdef FEATURE_PRESTIGE
-	int prestige;
-#endif
 
 	// MAPVOTE
 	int mapVotedFor[3];
@@ -1061,6 +1058,8 @@ struct gclient_s
 	int medals;
 	float acc;
 	float hspct;
+	float accscore;
+	float hsscore;
 
 	int flametime;                          ///< flamethrower exploit fix
 
@@ -1380,7 +1379,6 @@ typedef struct level_locals_s
 	int mapvotehistorycount;
 	char lastVotedMap[MAX_VOTE_MAPS];
 	int mapVoteNumMaps;
-	int mapsSinceLastXPReset;
 	qboolean mapVotePlayersCount;
 
 	// sv_cvars
@@ -1470,9 +1468,10 @@ void Cmd_UnIgnore_f(gentity_t *ent, unsigned int dwCommand, int value);
 void Cmd_SelectedObjective_f(gentity_t *ent, unsigned int dwCommand, int value);
 void Cmd_IntermissionPlayerKillsDeaths_f(gentity_t *ent, unsigned int dwCommand, int value);
 void Cmd_IntermissionPlayerTime_f(gentity_t *ent, unsigned int dwCommand, int value);
+#ifdef FEATURE_XPSAVE
+void Cmd_IntermissionXPSaveReset_f(gentity_t *ent, unsigned int dwCommand, int value);
+#endif
 void Cmd_IntermissionSkillRating_f(gentity_t *ent, unsigned int dwCommand, int value);
-void Cmd_IntermissionPrestige_f(gentity_t *ent, unsigned int dwCommand, int value);
-void Cmd_IntermissionCollectPrestige_f(gentity_t *ent, unsigned int dwCommand, int value);
 void Cmd_IntermissionWeaponAccuracies_f(gentity_t *ent, unsigned int dwCommand, int value);
 void Cmd_IntermissionWeaponStats_f(gentity_t *ent, unsigned int dwCommand, int value);
 void Cmd_UnIgnore_f(gentity_t *ent, unsigned int dwCommand, int value);
@@ -1876,7 +1875,7 @@ void G_InitMemory(void);
 void Svcmd_GameMem_f(void);
 
 // g_session.c
-void G_ReadSessionData(gclient_t *client);
+qboolean G_ReadSessionData(gclient_t *client);
 void G_InitSessionData(gclient_t *client, const char *userinfo);
 
 void G_InitWorldSession(void);
@@ -2332,6 +2331,14 @@ int G_DB_DeInit(void);
 #define TAU     (SIGMA / 100)   ///< dynamics factor
 #define EPSILON 0.f             ///< draw margin (assumed null)
 #define LAMBDA  10              ///< map continuity correction (n = 2 * LAMBDA, n >= 20)
+// effective sample size of the decayed map win counters (EMA over plays with exact cap).
+// Lower bound from noise: bias error epsilon shifts expected performance by
+// 2 * MU * epsilon mu (MU = 25), so epsilon <= SIGMA / 2 (~8%) keeps it
+// below the rating system's own noise floor;
+// delta = 7% at 95% confidence gives N = (1.96 / (2 * 0.07))^2 ~ 196. Upper bound from
+// adaptation lag (~N plays to track a real change) argues against much larger values.
+// N = 200 maximizes responsiveness subject to the estimate not being noise.
+#define MAP_BIAS_N 200.f
 
 void G_CalculateSkillRatings(void);
 float G_CalculateWinProbability(int team);
@@ -2357,35 +2364,14 @@ float G_SkillRatingGetMapRating(char *mapname);
 void G_SkillRatingSetMapRating(char *mapname, int winner);
 #endif
 
-#ifdef FEATURE_PRESTIGE
-// g_prestige.c
-typedef struct prData_s
-{
-	const unsigned char *guid;
-	int prestige;
-	int streak;
-	int skillpoints[SK_NUM_SKILLS];
-} prData_t;
-
-int G_PrestigeDBCheck(char *db_path, int db_mode);
-void G_GetClientPrestige(gclient_t *cl);
-void G_SetClientPrestige(gclient_t *cl, qboolean streakUp);
-int G_ReadPrestige(prData_t *pr_data);
-int G_WritePrestige(prData_t *pr_data);
+#ifdef FEATURE_XPSAVE
+// g_xpsave.c
+int G_XPSave_CheckDB(char *db_path, int db_mode);
+void G_XPSave_Load(gclient_t *cl);
+void G_XPSave_Store(gclient_t *cl);
+int G_XPSave_Clear();
+int G_XPSave_Reset(const unsigned char *guid);
 #endif
-
-#define XPSF_ENABLE              1  ///< enable XP Save on disconnect
-#define XPSF_NR_MAPRESET         2  ///< no reset on map restarts
-#define XPSF_NR_EVER             4  ///< no reset ever
-#define XPSF_WIPE_DUP_GUID       8  ///< call ClientDisconnect() on clients with the same GUID
-#define XPSF_DISABLE_STOPWATCH   16 ///< do not use xp-save when playing stopwatch
-#define XPSF_CONVERT             32 ///< if enabled the server tries to import old .xp format into etl database
-
-int G_XPSaver_CheckDB(char *db_path, int db_mode);
-void G_XPSaver_Load(gclient_t *cl);
-void G_XPSaver_Store(gclient_t *cl);
-int G_XPSaver_Clear();
-void G_XPSaver_Convert();
 
 // g_stats.c
 void G_UpgradeSkill(gentity_t *ent, skillType_t skill);
