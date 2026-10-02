@@ -474,41 +474,33 @@ int G_XPSave_Clear()
 
 /**
  * @brief Applies exponential decay to skillpoints based on inactivity.
- *        g_xpSaveResetThreshold is interpreted as the half-life in days.
+ *        g_xpSaveResetThreshold is interpreted as the half-life in hours.
  *        Medals are not decayed.
  * @param[in,out] xp_data
  */
 static void G_XPSave_ApplyDecay(xpData_t *xp_data)
 {
 	time_t now;
-	double days, halfLife, factor;
+	double hours, halfLife, factor;
 	int    i, newXp, decayed = qfalse;
 
-	if (g_xpSaveResetMode.integer != 3)
-	{
-		return;
-	}
-
-	if (g_xpSaveResetThreshold.integer <= 0)
-	{
-		return;
-	}
-
-	if (xp_data->updated == 0)
+	if (g_xpSaveResetMode.integer != 3 ||
+	    g_xpSaveResetThreshold.integer <= 0 ||
+	    xp_data->updated == 0)
 	{
 		return;
 	}
 
 	now      = time(NULL);
-	days     = difftime(now, xp_data->updated) / 86400.0;
+	hours    = difftime(now, xp_data->updated) / 3600.0;
 	halfLife = (double)g_xpSaveResetThreshold.integer;
 
-	if (days <= 0.0 || halfLife <= 0.0)
+	if (hours <= 0.0)
 	{
 		return;
 	}
 
-	factor = pow(0.5, days / halfLife);
+	factor = pow(0.5, hours / halfLife);
 
 	for (i = 0; i < SK_NUM_SKILLS; i++)
 	{
@@ -517,12 +509,7 @@ static void G_XPSave_ApplyDecay(xpData_t *xp_data)
 			continue;
 		}
 
-		newXp = (int)(xp_data->skillpoints[i] * factor);
-
-		if (newXp < 0)
-		{
-			newXp = 0;
-		}
+		newXp = (int)round(xp_data->skillpoints[i] * factor);
 
 		if (newXp != xp_data->skillpoints[i])
 		{
@@ -533,7 +520,7 @@ static void G_XPSave_ApplyDecay(xpData_t *xp_data)
 
 	if (decayed)
 	{
-		G_DPrintf("XP save: decayed skills after %.2f days of inactivity (half-life %.0f days)\n", days, halfLife);
+		G_DPrintf("XP save: decayed skills after %.2f hours of inactivity (half-life %.0f hours)\n", hours, halfLife);
 	}
 }
 
