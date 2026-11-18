@@ -33,6 +33,7 @@
  */
 
 #include "tr_local.h"
+#include "vulkan/vk.h"
 
 /**
  * @brief R_PerformanceCounters
@@ -107,14 +108,15 @@ void R_IssueRenderCommands(qboolean runPerformanceCounters)
 	cmdList->used = 0;
 
 	// at this point, the back end thread is idle, so it is ok
-	// to look at it's performance counters
+	// to look at its performance counters
 	if (runPerformanceCounters)
 	{
 		R_PerformanceCounters();
 	}
 
-	// actually start the commands going
-	if (!r_skipBackEnd->integer)
+	// actually start the commands going (not on a lost device, until the
+	// vid_restart: its command buffers can't be recorded again)
+	if (!r_skipBackEnd->integer && !VK_RestartPending())
 	{
 		// let it start on the new batch
 		RB_ExecuteRenderCommands(cmdList->cmds);
@@ -447,48 +449,30 @@ void RE_BeginFrame(void)
 	{
 		return;
 	}
+
+	// RE_BeginFrame() is called exactly once per real (presented) frame -
+	// unlike RB_ExecuteRenderCommands(), which R_IssuePendingRenderCommands()
+	// below may trigger several times within this same frame (e.g. for
+	// r_textureMode/r_gamma cvar changes) without ever swapping/presenting.
+	// So this is the correct, single place to start the Vulkan frame:
+	// wait on the in-flight fence, acquire the swapchain image and begin
+	// recording the command buffer/render pass. The matching submit+present
+	// happens once, in RB_SwapBuffers() via VK_EndFrame().
+	VK_BeginFrame();
+
 	glState.finishCalled = qfalse;
 
 	tr.frameCount++;
 	tr.frameSceneNum = 0;
 
-	R_ClearHudFBO();
-	R_BindMainFBO();
-
-	// do overdraw measurement
+	// overdraw measurement: renderer1 counts stencil increments read back
+	// with glReadPixels; the Vulkan backend has no stencil readback
 	if (r_measureOverdraw->integer)
 	{
-		if (glConfig.stencilBits < 4)
-		{
-			Ren_Print("Warning: not enough stencil bits to measure overdraw: %d\n", glConfig.stencilBits);
-			ri.Cvar_Set("r_measureOverdraw", "0");
-		}
-		else if (r_shadows->integer == 2)
-		{
-			Ren_Print("Warning: stencil shadows and overdraw measurement are mutually exclusive\n");
-			ri.Cvar_Set("r_measureOverdraw", "0");
-		}
-		else
-		{
-			R_IssuePendingRenderCommands();
-			glEnable(GL_STENCIL_TEST);
-			glStencilMask(~0U);
-			glClearStencil(0U);
-			glStencilFunc(GL_ALWAYS, 0U, ~0U);
-			glStencilOp(GL_KEEP, GL_INCR, GL_INCR);
-		}
-		r_measureOverdraw->modified = qfalse;
+		Ren_Print("Warning: r_measureOverdraw is not supported by the Vulkan renderer\n");
+		ri.Cvar_Set("r_measureOverdraw", "0");
 	}
-	else
-	{
-		// this is only reached if it was on and is now off
-		if (r_measureOverdraw->modified)
-		{
-			R_IssuePendingRenderCommands();
-			glDisable(GL_STENCIL_TEST);
-		}
-		r_measureOverdraw->modified = qfalse;
-	}
+	r_measureOverdraw->modified = qfalse;
 
 	// texturemode stuff
 	if (r_textureMode->modified)
@@ -506,9 +490,6 @@ void RE_BeginFrame(void)
 		R_IssuePendingRenderCommands();
 		R_SetColorMappings();
 	}
-
-	// check for errors
-	GL_CheckErrors();
 
 	// draw buffer stuff
 	cmd = R_GetCommandBuffer(sizeof(*cmd));

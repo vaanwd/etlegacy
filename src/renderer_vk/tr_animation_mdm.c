@@ -1716,6 +1716,154 @@ static void R_CalcBones(const refEntity_t *refent, int *boneList, int numBones)
  * @brief RB_MDM_SurfaceAnim
  * @param[in] surface
  */
+/**
+ * @brief Vulkan: the GPU skin buffer's first vertex of this MDM surface
+ * (R_LoadMDMSkinVertices), or -1 if it is skinned on the CPU.
+ */
+static int RB_MDMSkinFirstVertex(const mdmSurface_t *surface, const mdmHeader_t *header)
+{
+	model_t            *mod = R_GetModelByHandle(backEnd.currentEntity->e.hModel);
+	const mdmSurface_t *s;
+	int                i;
+
+	if (!mod || mod->type != MOD_MDM || mod->model.mdm != header || !mod->vkSkinFirstVertex)
+	{
+		return -1;
+	}
+
+	s = (const mdmSurface_t *)((const byte *)header + header->ofsSurfaces);
+	for (i = 0; i < header->numSurfaces; i++, s = (const mdmSurface_t *)((const byte *)s + s->ofsEnd))
+	{
+		if (s == surface)
+		{
+			return mod->vkSkinFirstVertex[i];
+		}
+	}
+
+	return -1;
+}
+
+/**
+ * @brief Vulkan: draws this MDM surface skinned in the vertex shader
+ * (tr3d_skin.vert): uploads its bones (R_CalcBones() has run) and writes
+ * its LOD-collapsed triangle indexes, pointing into the skin buffer, to the
+ * scene index arena; no tess vertices are produced. The surface gets a
+ * batch of its own (its bones), see tess.vkSkin. Needs render_count.
+ * @return qfalse if the surface must be skinned on the CPU: its shader
+ * isn't GPU-skinnable or the batch needs the tess vertices (fog volume,
+ * fading entity, debug views)
+ */
+static qboolean RB_MDM_SurfaceAnimGPU(mdmSurface_t *surface, mdmHeader_t *header, const int *boneList)
+{
+	int       firstVertex, firstIndex, numIndexes, numTriIdx, numVerts, i;
+	int       fadeStart = backEnd.currentEntity->e.fadeStartTime;
+	float     *dst;
+	glIndex_t *pIdx;
+	const int *tri;
+
+	if (!r_vkGpuVertex->integer || !tess.shader->vkSkinnable || !RB_VkModelFogOk() || backEnd.projection2D ||
+	    (fadeStart && fadeStart <= tr.refdef.time) ||
+	    r_bonesDebug->integer || r_showTris->integer || r_showNormals->integer || r_debugShaderSurfaceFlags->integer)
+	{
+		if (tess.vkSkin)
+		{
+			RB_EndStaticBatch(); // a CPU-skinned surface can't join a GPU-skinned batch
+		}
+		return qfalse;
+	}
+
+	firstVertex = RB_MDMSkinFirstVertex(surface, header);
+	if (firstVertex < 0)
+	{
+		if (tess.vkSkin)
+		{
+			RB_EndStaticBatch();
+		}
+		return qfalse;
+	}
+
+	// one surface per GPU-skinned batch: its bones
+	if (tess.numIndexes || tess.numVertexes)
+	{
+		RB_EndStaticBatch();
+	}
+	tess.vkSkin = qtrue;
+
+	dst  = VK_AllocSkinBones(surface->numBoneReferences, &tess.vkSkinBoneOffset);
+	pIdx = VK_AllocSceneIndexes(surface->numTriangles * 3, &firstIndex);
+	if (!dst || !pIdx)
+	{
+		return qtrue; // arena full this frame (reported there): drop the surface
+	}
+	RB_VkSetupEnvParams();
+
+	// bone rows as in LocalAddScaledMatrixTransformVectorTranslate():
+	// row r = (matrix[r][0..2], translation[r])
+	for (i = 0; i < surface->numBoneReferences; i++, dst += 12)
+	{
+		const mdxBoneFrame_t *b = &bones[boneList[i]];
+		int                  r;
+
+		for (r = 0; r < 3; r++)
+		{
+			dst[r * 4 + 0] = b->matrix[r][0];
+			dst[r * 4 + 1] = b->matrix[r][1];
+			dst[r * 4 + 2] = b->matrix[r][2];
+			dst[r * 4 + 3] = b->translation[r];
+		}
+	}
+
+	// triangle list, as the CPU path below (LOD collapse); the counts are
+	// local: the index stores could alias the surface for the compiler
+	tri        = (const int *)((const byte *)surface + surface->ofsTriangles);
+	numIndexes = 0;
+	numTriIdx  = surface->numTriangles * 3;
+	numVerts   = surface->numVerts;
+	if (render_count == numVerts)
+	{
+		for (i = 0; i < numTriIdx; i++)
+		{
+			pIdx[i] = firstVertex + tri[i];
+		}
+		numIndexes = numTriIdx;
+	}
+	else
+	{
+		const int *cmap = (const int *)((const byte *)surface + surface->ofsCollapseMap);
+		int       p0, p1, p2;
+
+		for (i = 0; i < render_count; i++)
+		{
+			collapse[i] = i;
+		}
+		for (; i < numVerts; i++)
+		{
+			collapse[i] = collapse[cmap[i]];
+		}
+
+		for (i = 0; i < numTriIdx; i += 3)
+		{
+			p0 = collapse[tri[i]];
+			p1 = collapse[tri[i + 1]];
+			p2 = collapse[tri[i + 2]];
+
+			if (p0 == p1 || p1 == p2 || p2 == p0)
+			{
+				continue;
+			}
+
+			pIdx[numIndexes++] = firstVertex + p0;
+			pIdx[numIndexes++] = firstVertex + p1;
+			pIdx[numIndexes++] = firstVertex + p2;
+		}
+	}
+
+	tess.vkSkinFirstIndex = firstIndex;
+	tess.numIndexes       = numIndexes;
+
+	return qtrue;
+}
+
 void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 {
 	int         j, k;
@@ -1774,6 +1922,11 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 
 	// to profile bone transform performance only
 	if (r_bonesDebug->integer == 10)
+	{
+		return;
+	}
+
+	if (RB_MDM_SurfaceAnimGPU(surface, header, boneList))
 	{
 		return;
 	}
@@ -1897,32 +2050,29 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 				GL_Bind(tr.whiteImage);
 				if (r_bonesDebug->integer != 9)
 				{
-					glLineWidth(1);
-					glBegin(GL_LINES);
+					VKimm_Begin(GL_LINES);
 					for (j = 0; j < 3; j++)
 					{
 						VectorClear(vec);
 						vec[j] = 1;
-						glColor3fv(vec);
-						glVertex3fv(bonePtr->translation);
+						VKimm_Color3fv(vec);
+						VKimm_Vertex3fv(bonePtr->translation);
 						VectorMA(bonePtr->translation, (r_bonesDebug->integer == 8 ? 1.5f : 5), bonePtr->matrix[j], vec);
-						glVertex3fv(vec);
+						VKimm_Vertex3fv(vec);
 					}
-					glEnd();
+					VKimm_End();
 				}
 
 				// connect to our parent if it's valid
 				if (validBones[boneInfo[*boneRefs].parent])
 				{
-					glLineWidth(r_bonesDebug->integer == 8 ? 4 : 2);
-					glBegin(GL_LINES);
-					glColor3f(.6f, .6f, .6f);
-					glVertex3fv(bonePtr->translation);
-					glVertex3fv(bones[boneInfo[*boneRefs].parent].translation);
-					glEnd();
+					VKimm_Begin(GL_LINES);
+					VKimm_Color3f(.6f, .6f, .6f);
+					VKimm_Vertex3fv(bonePtr->translation);
+					VKimm_Vertex3fv(bones[boneInfo[*boneRefs].parent].translation);
+					VKimm_End();
 				}
 
-				glLineWidth(1);
 			}
 
 			if (r_bonesDebug->integer == 8)
@@ -1932,8 +2082,7 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 				mdxHeader_t *mdxHeader = R_GetModelByHandle(refent->frameModel)->model.mdx;
 				boneRefs = ( int * )((byte *)surface + surface->ofsBoneReferences);
 
-				glDepthRange(0, 0);        // never occluded
-				glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+				VK_SetDepthRange(0, 0);        // never occluded
 
 				for (i = 0; i < surface->numBoneReferences; i++, boneRefs++)
 				{
@@ -1948,18 +2097,16 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 					vec[1] = vec[1] + diff[1] * 6;
 					vec[2] = vec[2] + diff[2] * 3;
 
-					glEnable(GL_BLEND);
-					glBegin(GL_LINES);
-					glColor4f(1.f, .4f, .05f, .35f);
-					glVertex3fv(bonePtr->translation);
-					glVertex3fv(vec);
-					glEnd();
-					glDisable(GL_BLEND);
+					VKimm_Begin(GL_LINES);
+					VKimm_Color4f(1.f, .4f, .05f, .35f);
+					VKimm_Vertex3fv(bonePtr->translation);
+					VKimm_Vertex3fv(vec);
+					VKimm_End();
 
 					R_DebugText(vec, 1.f, 1.f, 1.f, mdxBoneInfo->name, qfalse);         // qfalse, as there is no reason to set depthrange again
 				}
 
-				glDepthRange(0, 1);
+				VK_SetDepthRange(0, 1);
 				//}
 			}
 			else if (r_bonesDebug->integer == 9)
@@ -1968,8 +2115,7 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 				{
 					mdmTag_t *pTag = ( mdmTag_t * )((byte *)header + header->ofsTags);
 
-					glDepthRange(0, 0);    // never occluded
-					glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+					VK_SetDepthRange(0, 0);    // never occluded
 
 					for (i = 0; i < header->numTags; i++)
 					{
@@ -1987,18 +2133,17 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 						}
 
 						GL_Bind(tr.whiteImage);
-						glLineWidth(2);
-						glBegin(GL_LINES);
+						VKimm_Begin(GL_LINES);
 						for (j = 0; j < 3; j++)
 						{
 							VectorClear(vec);
 							vec[j] = 1;
-							glColor3fv(vec);
-							glVertex3fv(outTag.origin);
+							VKimm_Color3fv(vec);
+							VKimm_Vertex3fv(outTag.origin);
 							VectorMA(outTag.origin, 5, outTag.axis[j], vec);
-							glVertex3fv(vec);
+							VKimm_Vertex3fv(vec);
 						}
-						glEnd();
+						VKimm_End();
 
 						VectorSet(vec, 0.f, 0.f, 32.f);
 						VectorSubtract(outTag.origin, vec, diff);
@@ -2006,20 +2151,17 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 						vec[1] = vec[1] + diff[1] * 2;
 						vec[2] = vec[2] + diff[2] * 1.5f;
 
-						glLineWidth(1);
-						glEnable(GL_BLEND);
-						glBegin(GL_LINES);
-						glColor4f(1.f, .4f, .05f, .35f);
-						glVertex3fv(outTag.origin);
-						glVertex3fv(vec);
-						glEnd();
-						glDisable(GL_BLEND);
+						VKimm_Begin(GL_LINES);
+						VKimm_Color4f(1.f, .4f, .05f, .35f);
+						VKimm_Vertex3fv(outTag.origin);
+						VKimm_Vertex3fv(vec);
+						VKimm_End();
 
 						R_DebugText(vec, 1.f, 1.f, 1.f, pTag->name, qfalse);    // qfalse, as there is no reason to set depthrange again
 
 						pTag = ( mdmTag_t * )((byte *)pTag + pTag->ofsEnd);
 					}
-					glDepthRange(0, 1);
+					VK_SetDepthRange(0, 1);
 				}
 			}
 		}
@@ -2033,24 +2175,23 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 			tempNormal = ( float * )(tess.normal + baseVertex);
 
 			GL_Bind(tr.whiteImage);
-			glLineWidth(1);
-			glBegin(GL_LINES);
-			glColor3f(.0, .0, .8f);
+			VKimm_Begin(GL_LINES);
+			VKimm_Color3f(.0, .0, .8f);
 
 			pIndexes = &tess.indexes[oldIndexes];
 			for (j = 0; j < render_indexes / 3; j++, pIndexes += 3)
 			{
-				glVertex3fv(tempVert + 4 * pIndexes[0]);
-				glVertex3fv(tempVert + 4 * pIndexes[1]);
+				VKimm_Vertex3fv(tempVert + 4 * pIndexes[0]);
+				VKimm_Vertex3fv(tempVert + 4 * pIndexes[1]);
 
-				glVertex3fv(tempVert + 4 * pIndexes[1]);
-				glVertex3fv(tempVert + 4 * pIndexes[2]);
+				VKimm_Vertex3fv(tempVert + 4 * pIndexes[1]);
+				VKimm_Vertex3fv(tempVert + 4 * pIndexes[2]);
 
-				glVertex3fv(tempVert + 4 * pIndexes[2]);
-				glVertex3fv(tempVert + 4 * pIndexes[0]);
+				VKimm_Vertex3fv(tempVert + 4 * pIndexes[2]);
+				VKimm_Vertex3fv(tempVert + 4 * pIndexes[0]);
 			}
 
-			glEnd();
+			VKimm_End();
 
 
 			if (r_bonesDebug->integer == 4) // track debug stats
@@ -2073,29 +2214,29 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
 			v        = ( mdmVertex_t * )((byte *)surface + surface->ofsVerts);
 			tempVert = ( float * )(tess.xyz + baseVertex);
 			GL_Bind(tr.whiteImage);
-			glPointSize(5);
-			glBegin(GL_POINTS);
+			VKimm_PointSize(5);
+			VKimm_Begin(GL_POINTS);
 			for (j = 0; j < render_count; j++, tempVert += 4)
 			{
 				if (v->numWeights > 1)
 				{
 					if (v->numWeights == 2)
 					{
-						glColor3f(.4f, .4f, 0.f);
+						VKimm_Color3f(.4f, .4f, 0.f);
 					}
 					else if (v->numWeights == 3)
 					{
-						glColor3f(.8f, .4f, 0.f);
+						VKimm_Color3f(.8f, .4f, 0.f);
 					}
 					else
 					{
-						glColor3f(1.f, .4f, 0.f);
+						VKimm_Color3f(1.f, .4f, 0.f);
 					}
-					glVertex3fv(tempVert);
+					VKimm_Vertex3fv(tempVert);
 				}
 				v = (mdmVertex_t *)&v->weights[v->numWeights];
 			}
-			glEnd();
+			VKimm_End();
 		}
 	}
 
@@ -2109,9 +2250,8 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
         // show model bounds
         GL_Bind( tr.whiteImage );
         GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE );
-        glLineWidth( 1 );
-        glColor3f( .0,.8,.0 );
-        glBegin( GL_LINES );
+        VKimm_Color3f( .0,.8,.0 );
+        VKimm_Begin( GL_LINES );
 
         VectorSubtract( mdxFrame->bounds[0], mdxFrame->bounds[1], diff);
 
@@ -2121,12 +2261,12 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
         v1[0] -= diff[0];
         v2[1] -= diff[1];
         v3[2] -= diff[2];
-        glVertex3fv( mdxFrame->bounds[0] );
-        glVertex3fv( v1 );
-        glVertex3fv( mdxFrame->bounds[0] );
-        glVertex3fv( v2 );
-        glVertex3fv( mdxFrame->bounds[0] );
-        glVertex3fv( v3 );
+        VKimm_Vertex3fv( mdxFrame->bounds[0] );
+        VKimm_Vertex3fv( v1 );
+        VKimm_Vertex3fv( mdxFrame->bounds[0] );
+        VKimm_Vertex3fv( v2 );
+        VKimm_Vertex3fv( mdxFrame->bounds[0] );
+        VKimm_Vertex3fv( v3 );
 
         VectorCopy( mdxFrame->bounds[1], v4 );
         VectorCopy( mdxFrame->bounds[1], v5 );
@@ -2134,28 +2274,28 @@ void RB_MDM_SurfaceAnim(mdmSurface_t *surface)
         v4[0] += diff[0];
         v5[1] += diff[1];
         v6[2] += diff[2];
-        glVertex3fv( mdxFrame->bounds[1] );
-        glVertex3fv( v4 );
-        glVertex3fv( mdxFrame->bounds[1] );
-        glVertex3fv( v5 );
-        glVertex3fv( mdxFrame->bounds[1] );
-        glVertex3fv( v6 );
+        VKimm_Vertex3fv( mdxFrame->bounds[1] );
+        VKimm_Vertex3fv( v4 );
+        VKimm_Vertex3fv( mdxFrame->bounds[1] );
+        VKimm_Vertex3fv( v5 );
+        VKimm_Vertex3fv( mdxFrame->bounds[1] );
+        VKimm_Vertex3fv( v6 );
 
-        glVertex3fv( v2 );
-        glVertex3fv( v6 );
-        glVertex3fv( v6 );
-        glVertex3fv( v1 );
-        glVertex3fv( v1 );
-        glVertex3fv( v5 );
+        VKimm_Vertex3fv( v2 );
+        VKimm_Vertex3fv( v6 );
+        VKimm_Vertex3fv( v6 );
+        VKimm_Vertex3fv( v1 );
+        VKimm_Vertex3fv( v1 );
+        VKimm_Vertex3fv( v5 );
 
-        glVertex3fv( v2 );
-        glVertex3fv( v4 );
-        glVertex3fv( v4 );
-        glVertex3fv( v3 );
-        glVertex3fv( v3 );
-        glVertex3fv( v5 );
+        VKimm_Vertex3fv( v2 );
+        VKimm_Vertex3fv( v4 );
+        VKimm_Vertex3fv( v4 );
+        VKimm_Vertex3fv( v3 );
+        VKimm_Vertex3fv( v3 );
+        VKimm_Vertex3fv( v5 );
 
-        glEnd();
+        VKimm_End();
     }*/
 
 	if (r_bonesDebug->integer > 1)

@@ -91,7 +91,9 @@ static qboolean LoadSplashImage(const char *name, byte *data, unsigned int size,
 	splashHandle = RE_RegisterShaderFromImage(LEGACY_SPLASH_NAME, LIGHTMAP_2D, splashImage, qfalse);
 #endif // FEATURE_RENDERER2
 
+#ifndef FEATURE_RENDERER_VULKAN
 	GL_CheckErrors();
+#endif
 
 	return qtrue;
 }
@@ -120,11 +122,18 @@ void R_DrawSplash(void)
 	y = (glConfig.vidHeight - h) * 0.5f;
 
 	RE_BeginFrame();
+#ifdef FEATURE_RENDERER_VULKAN
+	VK_SetClearColor(0.f, 0.f, 0.f, 1.f);
+	VK_ClearSceneColor(qtrue);
+#else
 	glClearColor(0.f, 0.f, 0.f, 1.f);
 	glClear(GL_COLOR_BUFFER_BIT);
+#endif
 	RE_SetColor(NULL);
 	RE_StretchPic(x, y, w, h, 0, 0, 1, 1, splashHandle);
 	RE_EndFrame(NULL, NULL);
 
+#ifndef FEATURE_RENDERER_VULKAN
 	GL_CheckErrors();
+#endif
 }

@@ -53,10 +53,20 @@
  */
 void RB_CheckOverflow(int verts, int indexes)
 {
+	qboolean softFlags[2];
+
+	if (tess.vkStatic || tess.vkSkin || tess.vkMesh || tess.vkFoliage)
+	{
+		RB_EndStaticBatch();
+	}
+
 	if (tess.numVertexes + verts < SHADER_MAX_VERTEXES && tess.numIndexes + indexes < SHADER_MAX_INDEXES)
 	{
 		return;
 	}
+
+	softFlags[0] = tess.vkSoft;
+	softFlags[1] = tess.vkNotSoft;
 
 	RB_EndSurface();
 
@@ -70,6 +80,10 @@ void RB_CheckOverflow(int verts, int indexes)
 	}
 
 	RB_BeginSurface(tess.shader, tess.fogNum);
+
+	// the rest of the same surfaces
+	tess.vkSoft    = softFlags[0];
+	tess.vkNotSoft = softFlags[1];
 }
 
 /*
@@ -355,6 +369,143 @@ void RB_SurfacePolychain(srfPoly_t *p)
 }
 
 /**
+ * @brief Vulkan: flushes a static world batch so tessellated surfaces
+ * (which need tess vertex data) start a batch of their own.
+ */
+void RB_EndStaticBatch(void)
+{
+	RB_EndSurface();
+	RB_BeginSurface(tess.shader, tess.fogNum);
+}
+
+/**
+ * @brief Vulkan: true if a static batch can take a surface lit by dlightBits:
+ * either renderer1 draws no dlight pass for it, or the pass can be folded
+ * into the static draw (tr3d_lm_static_dlight.vert / tr3d_lm_dlight.frag):
+ * lightmapped multitexture iterator, ball dlights only, at most 8 lights in
+ * the batch with one pass per light (r_dynamicLight 2).
+ */
+static qboolean RB_StaticDlightsOk(int dlightBits)
+{
+	int bits, l, n;
+
+	if (!dlightBits || !RB_ShaderTakesDlights(dlightBits))
+	{
+		return qtrue; // no dlight pass to fold
+	}
+
+	// the folded pass is written for the opaque single-draw lightmapped
+	// iterator (tr3d_lm_dlight.frag multiplies its result)
+	if (!r_vkGpuVertex->integer || tess.currentStageIteratorFunc != RB_StageIteratorLightmappedMultitexture)
+	{
+		return qfalse;
+	}
+
+	bits = dlightBits | (tess.vkStatic ? tess.dlightBits : 0);
+	for (l = 0, n = 0; l < backEnd.refdef.num_dlights; l++)
+	{
+		if (bits & (1 << l))
+		{
+			// directed dlights need vertex normals, the static buffer has none
+			if (backEnd.refdef.dlights[l].flags & REF_DIRECTED_DLIGHT)
+			{
+				return qfalse;
+			}
+			n++;
+		}
+	}
+
+	// r_dynamicLight 2 draws one pass per light: the shaders fold up to 8
+	return (r_dynamicLight->integer != 2 || n <= 8) ? qtrue : qfalse;
+}
+
+/**
+ * @brief Vulkan: true when this triangle surface can be drawn from the
+ * static world buffer in the current batch: the shader's stages are static
+ * (shader_t::vkStatic) and nothing needs the tessellated vertices - no fog
+ * volume, no dlight pass that can't be folded (RB_StaticDlightsOk), no
+ * fading entity, no debug view.
+ */
+static qboolean RB_SurfaceCanBeStatic(const srfTriangles_t *srf)
+{
+	return (srf->vkFirstVertex >= 0 && RB_StaticDlightsOk(srf->dlightBits) && tess.shader->vkStatic && !tess.fogNum &&
+	        r_vkStaticWorld->integer && !backEnd.projection2D && !backEnd.currentEntity->e.fadeStartTime &&
+	        !r_showTris->integer && !r_showNormals->integer && !r_debugShaderSurfaceFlags->integer) ? qtrue : qfalse;
+}
+
+/**
+ * @brief Vulkan: adds a triangle surface to a static world batch by
+ * emitting only its indexes, offset to its vertices in the static world
+ * buffer (tess vertex data is left empty). The first surface of a batch
+ * decides its mode; a surface that needs the other mode starts a new
+ * batch. The indexes go straight into the frame's scene index arena
+ * (not tess.indexes), so every stage of the batch draws the same range
+ * without copying it again.
+ * @return qfalse if the surface must be tessellated
+ */
+static qboolean RB_SurfaceTrianglesStatic(srfTriangles_t *srf)
+{
+	qboolean  canBeStatic = RB_SurfaceCanBeStatic(srf);
+	glIndex_t *dst;
+	int       i, base, first;
+
+	// a GPU-culled group is a batch of its own
+	if (tess.vkIndirect)
+	{
+		RB_EndStaticBatch();
+	}
+
+	if (tess.numIndexes == 0 && tess.numVertexes == 0)
+	{
+		tess.vkStatic = canBeStatic;
+	}
+	else if (tess.vkStatic != canBeStatic)
+	{
+		RB_EndStaticBatch();
+		tess.vkStatic = canBeStatic;
+	}
+
+	if (!canBeStatic)
+	{
+		return qfalse;
+	}
+
+	if (tess.numIndexes + srf->numIndexes >= SHADER_MAX_INDEXES)
+	{
+		RB_EndStaticBatch();
+		tess.vkStatic = qtrue;
+	}
+
+	dst = VK_AllocSceneIndexes(srf->numIndexes, &first);
+	if (!dst)
+	{
+		return qtrue; // arena full this frame (reported there): drop the surface
+	}
+
+	// a batch's indexes must stay one contiguous range
+	if (tess.numIndexes && first != tess.vkStaticFirstIndex + tess.numIndexes)
+	{
+		RB_EndStaticBatch();
+		tess.vkStatic = qtrue;
+	}
+	if (tess.numIndexes == 0)
+	{
+		tess.vkStaticFirstIndex = first;
+	}
+
+	tess.dlightBits |= srf->dlightBits;
+
+	base = srf->vkFirstVertex;
+	for (i = 0; i < srf->numIndexes; i++)
+	{
+		dst[i] = base + srf->indexes[i];
+	}
+	tess.numIndexes += srf->numIndexes;
+
+	return qtrue;
+}
+
+/**
  * @brief RB_SurfaceTriangles
  * @param[in] srf
  */
@@ -366,6 +517,11 @@ void RB_SurfaceTriangles(srfTriangles_t *srf)
 	byte       *color;
 	int        dlightBits;
 	qboolean   needsNormal;
+
+	if (RB_SurfaceTrianglesStatic(srf))
+	{
+		return;
+	}
 
 	// moved before overflow so dlights work properly
 	RB_CHECKOVERFLOW(srf->numVerts, srf->numIndexes);
@@ -431,15 +587,190 @@ void RB_SurfaceTriangles(srfTriangles_t *srf)
 }
 
 /**
+ * @brief The per-instance part of RB_SurfaceFoliage: distance and frustum
+ * cull, then the instance color with the distance-faded alpha. Instanced
+ * foliage does the same in its vertex shaders (FoliageInstanceColor() in
+ * tr3d_foliage.vert / tr3d_foliage_fog.vert): keep them in step.
+ * @return qfalse if the instance is culled
+ */
+static ID_INLINE qboolean RB_FoliageInstanceColor(int o, const foliageInstance_t *instance, const vec4_t distanceCull,
+                                                  const vec4_t distanceVector, float fovScale, int *srcColor)
+{
+	float alpha, z, dist;
+	int   i, a;
+
+	// fade alpha based on distance between inner and outer radii
+	if (distanceCull[1] > 0.0f)
+	{
+		// calculate z distance
+		z = fovScale * (DotProduct(instance->origin, distanceVector) + distanceVector[3]);
+		if (z < -64.0f)      // epsilon so close-by foliage doesn't pop in and out
+		{
+			return qfalse;
+		}
+
+		// check against frustum planes
+		for (i = 0; i < 5; i++)
+		{
+			dist = DotProduct(instance->origin, backEnd.viewParms.frustum[i].normal) - backEnd.viewParms.frustum[i].dist;
+			if (dist < -64)
+			{
+				break;
+			}
+		}
+		if (i != 5)
+		{
+			return qfalse;
+		}
+
+		// radix
+		if (o & 1)
+		{
+			z *= 1.25;
+			if (o & 2)
+			{
+				z *= 1.25;
+			}
+		}
+
+		// calculate alpha
+		alpha = (distanceCull[1] - z) * distanceCull[3];
+		if (alpha < distanceCull[2])
+		{
+			return qfalse;
+		}
+
+		// set color
+		a = alpha > 1.0f ? 255 : (int)(alpha * 255);
+#ifdef Q3_BIG_ENDIAN // LBO 3/15/05. Byte-swap fix for Mac - alpha is in the LSB.
+		*srcColor = (*((const int *) instance->color) & 0xFFFFFF00) | (a & 0xff);
+#else
+		*srcColor = (*((const int *) instance->color) & 0xFFFFFF) | (a << 24);
+#endif
+	}
+	else
+	{
+		*srcColor = *((const int *) instance->color);
+	}
+
+	return qtrue;
+}
+
+/**
+ * @brief Vulkan: true when this foliage surface can be drawn instanced
+ * (RB_SurfaceFoliageInstanced): its model is in the static world buffer,
+ * the shader's stages are static (shader_t::vkStatic) single-texture stages
+ * with texture coords in the generic iterator, and nothing needs the
+ * tessellated vertices - no dlight pass, no fog color modulation, no fading
+ * entity, no debug view.
+ */
+static qboolean RB_FoliageCanInstance(const srfFoliage_t *srf)
+{
+	int i;
+
+	if (srf->vkFirstVertex < 0 || srf->vkFirstInstance < 0 || !r_vkFoliageInstance->integer || !r_vkStaticWorld->integer || !tess.shader->vkStatic ||
+	    tess.currentStageIteratorFunc != RB_StageIteratorGeneric || backEnd.projection2D || backEnd.currentEntity->e.fadeStartTime ||
+	    (srf->dlightBits && RB_ShaderTakesDlights(srf->dlightBits)) ||
+	    r_showTris->integer || r_showNormals->integer || r_debugShaderSurfaceFlags->integer)
+	{
+		return qfalse;
+	}
+
+	for (i = 0; i < MAX_SHADER_STAGES && tess.xstages[i]; i++)
+	{
+		const shaderStage_t *pStage = tess.xstages[i];
+
+		if (pStage->bundle[1].image[0] || pStage->bundle[0].tcGen != TCGEN_TEXTURE ||
+		    (tess.fogNum && !tess.shader->noFog && pStage->adjustColorsForFog != ACFF_NONE))
+		{
+			return qfalse;
+		}
+	}
+
+	return qtrue;
+}
+
+/**
+ * @brief Vulkan: adds a foliage surface to an instanced batch
+ * (tess.vkFoliage): its instances are in the foliage instance buffer, and
+ * the batch's stages draw the model from the static world buffer once per
+ * instance; the vertex shaders cull each instance with the batch's
+ * parameters (RB_FoliageInstanceColor's view depth, frustum and
+ * distanceCull, written once per batch). Consecutive surfaces with the same
+ * model and adjacent instances share a draw.
+ */
+static void RB_SurfaceFoliageInstanced(srfFoliage_t *srf, const vec4_t distanceCull, const vec4_t distanceVector, float fovScale)
+{
+	vkFoliageDraw_t *draw;
+	glIndex_t       *indexes;
+	float           *cull;
+	int             i, firstIndex;
+
+	if ((tess.numIndexes || tess.numVertexes || tess.vkStatic || tess.vkSkin || tess.vkMesh) &&
+	    (!tess.vkFoliage || tess.vkNumFoliageDraws == VK_MAX_FOLIAGE_DRAWS))
+	{
+		RB_EndStaticBatch();
+		tess.dlightBits |= srf->dlightBits;
+	}
+
+	// the batch's cull parameters: same shader, entity and view for all its surfaces
+	if (!tess.vkFoliage)
+	{
+		cull = VK_AllocFoliageCull(&tess.vkFoliageCullOffset);
+		if (!cull)
+		{
+			return; // arena full this frame (reported there): drop the surface
+		}
+		for (i = 0; i < 5; i++)
+		{
+			VectorCopy(backEnd.viewParms.frustum[i].normal, cull + i * 4);
+			cull[i * 4 + 3] = backEnd.viewParms.frustum[i].dist;
+		}
+		Vector4Copy(distanceVector, cull + 20);
+		Vector4Copy(distanceCull, cull + 24);
+		cull[28] = fovScale;
+		cull[29] = cull[30] = cull[31] = 0.0f;
+	}
+
+	draw = tess.vkNumFoliageDraws ? &tess.vkFoliageDraws[tess.vkNumFoliageDraws - 1] : NULL;
+	if (draw && draw->firstVertex == srf->vkFirstVertex && draw->firstInstance + draw->numInstances == srf->vkFirstInstance)
+	{
+		draw->numInstances += srf->numInstances;
+	}
+	else
+	{
+		indexes = VK_AllocSceneIndexes(srf->numIndexes, &firstIndex);
+		if (!indexes)
+		{
+			return; // arena full this frame (reported there)
+		}
+		for (i = 0; i < srf->numIndexes; i++)
+		{
+			indexes[i] = srf->vkFirstVertex + srf->indexes[i];
+		}
+
+		draw                = &tess.vkFoliageDraws[tess.vkNumFoliageDraws++];
+		draw->firstVertex   = srf->vkFirstVertex;
+		draw->firstIndex    = firstIndex;
+		draw->numIndexes    = srf->numIndexes;
+		draw->firstInstance = srf->vkFirstInstance;
+		draw->numInstances  = srf->numInstances;
+	}
+
+	tess.vkFoliage   = qtrue;
+	tess.numIndexes += srf->numInstances * srf->numIndexes;
+}
+
+/**
  * @brief RB_SurfaceFoliage
  * @param[in] srf
  */
 void RB_SurfaceFoliage(srfFoliage_t *srf)
 {
-	int               o, i, a;
+	int               o, i;
 	int               numVerts = srf->numVerts, numIndexes = srf->numIndexes;   // basic setup
 	vec4_t            distanceCull, distanceVector;
-	float             alpha, z, dist, fovScale = backEnd.viewParms.fovX * (1.0f / 90.0f);
+	float             alpha, z, fovScale = backEnd.viewParms.fovX * (1.0f / 90.0f);
 	vec3_t            local;
 	vec_t             *xyz;
 	int               srcColor, *color;
@@ -470,62 +801,19 @@ void RB_SurfaceFoliage(srfFoliage_t *srf)
 	dlightBits       = srf->dlightBits;
 	tess.dlightBits |= dlightBits;
 
+	if (RB_FoliageCanInstance(srf))
+	{
+		RB_SurfaceFoliageInstanced(srf, distanceCull, distanceVector, fovScale);
+		return;
+	}
+
 	// iterate through origin list
 	instance = srf->instances;
 	for (o = 0; o < srf->numInstances; o++, instance++)
 	{
-		// fade alpha based on distance between inner and outer radii
-		if (distanceCull[1] > 0.0f)
+		if (!RB_FoliageInstanceColor(o, instance, distanceCull, distanceVector, fovScale, &srcColor))
 		{
-			// calculate z distance
-			z = fovScale * (DotProduct(instance->origin, distanceVector) + distanceVector[3]);
-			if (z < -64.0f)      // epsilon so close-by foliage doesn't pop in and out
-			{
-				continue;
-			}
-
-			// check against frustum planes
-			for (i = 0; i < 5; i++)
-			{
-				dist = DotProduct(instance->origin, backEnd.viewParms.frustum[i].normal) - backEnd.viewParms.frustum[i].dist;
-				if (dist < -64)
-				{
-					break;
-				}
-			}
-			if (i != 5)
-			{
-				continue;
-			}
-
-			// radix
-			if (o & 1)
-			{
-				z *= 1.25;
-				if (o & 2)
-				{
-					z *= 1.25;
-				}
-			}
-
-			// calculate alpha
-			alpha = (distanceCull[1] - z) * distanceCull[3];
-			if (alpha < distanceCull[2])
-			{
-				continue;
-			}
-
-			// set color
-			a = alpha > 1.0f ? 255 : (int)(alpha * 255);
-#ifdef Q3_BIG_ENDIAN // LBO 3/15/05. Byte-swap fix for Mac - alpha is in the LSB.
-			srcColor = (*((int *) instance->color) & 0xFFFFFF00) | (a & 0xff);
-#else
-			srcColor = (*((int *) instance->color) & 0xFFFFFF) | (a << 24);
-#endif
-		}
-		else
-		{
-			srcColor = *((int *) instance->color);
+			continue;
 		}
 
 		//Ren_Print("Color: %d %d %d %d\n", srf->colors[ o ][ 0 ], srf->colors[ o ][ 1 ], srf->colors[ o ][ 2 ], alpha );
@@ -624,15 +912,15 @@ void RB_SurfaceBeam(void)
 
 	GL_State(GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE);
 
-	glColor3f(1, 0, 0);
+	VKimm_Color3f(1, 0, 0);
 
-	glBegin(GL_TRIANGLE_STRIP);
+	VKimm_Begin(GL_TRIANGLE_STRIP);
 	for (i = 0; i <= NUM_BEAM_SEGS; i++)
 	{
-		glVertex3fv(start_points[i % NUM_BEAM_SEGS]);
-		glVertex3fv(end_points[i % NUM_BEAM_SEGS]);
+		VKimm_Vertex3fv(start_points[i % NUM_BEAM_SEGS]);
+		VKimm_Vertex3fv(end_points[i % NUM_BEAM_SEGS]);
 	}
-	glEnd();
+	VKimm_End();
 }
 
 //================================================================================
@@ -1159,6 +1447,241 @@ static void LerpMeshVertexes(md3Surface_t *surf, float backlerp)
 	LerpMeshVertexes_scalar(surf, backlerp);
 }
 
+/*
+ * Vulkan GPU MD3/MDC animation: every loaded MD3 and MDC surface's frames,
+ * texture coords and triangles live in the mesh buffer (VK_WriteMeshData);
+ * this table maps a surface to their byte offsets. Reset with the models.
+ */
+#define VK_MESH_MAP_SIZE 8192 // power of two, > the number of loaded MD3/MDC surfaces
+
+typedef struct
+{
+	const void *surf;
+	int xyzOfs;        // MD3 frames / MDC base frames (md3XyzNormal_t)
+	int compOfs;       // MDC compressed frames (mdcXyzCompressed_t), -1 = none
+	int stOfs, indexOfs;
+} vkMeshEntry_t;
+
+static vkMeshEntry_t vkMeshMap[VK_MESH_MAP_SIZE];
+
+static unsigned int R_VkMeshHash(const void *surf)
+{
+	return (unsigned int)(((size_t)surf >> 4) * 2654435761u) & (VK_MESH_MAP_SIZE - 1);
+}
+
+static void R_VkMeshInsert(const void *surf, int xyzOfs, int compOfs, int stOfs, int indexOfs)
+{
+	unsigned int h = R_VkMeshHash(surf);
+	int          i;
+
+	for (i = 0; i < VK_MESH_MAP_SIZE; i++, h = (h + 1) & (VK_MESH_MAP_SIZE - 1))
+	{
+		if (!vkMeshMap[h].surf || vkMeshMap[h].surf == surf)
+		{
+			vkMeshMap[h].surf     = surf;
+			vkMeshMap[h].xyzOfs   = xyzOfs;
+			vkMeshMap[h].compOfs  = compOfs;
+			vkMeshMap[h].stOfs    = stOfs;
+			vkMeshMap[h].indexOfs = indexOfs;
+			return;
+		}
+	}
+}
+
+static const vkMeshEntry_t *R_VkMeshFind(const void *surf)
+{
+	unsigned int h = R_VkMeshHash(surf);
+	int          i;
+
+	for (i = 0; i < VK_MESH_MAP_SIZE && vkMeshMap[h].surf; i++, h = (h + 1) & (VK_MESH_MAP_SIZE - 1))
+	{
+		if (vkMeshMap[h].surf == surf)
+		{
+			return &vkMeshMap[h];
+		}
+	}
+
+	return NULL;
+}
+
+/**
+ * @brief Vulkan: the RB_CalcEnvironmentTexCoords() parameters of the current
+ * entity (view origin in model space, s/t adjust from its origin, the two
+ * axis rows the reflection is projected on), written to the uniform arena
+ * for a GPU-skinned/animated batch whose shader has a tcGen environment
+ * stage (tess.vkEnvOffset). Same expressions as the CPU code.
+ */
+void RB_VkSetupEnvParams(void)
+{
+	float *dst, *p = tess.vkEnvParams;
+	float sAdjust, tAdjust;
+	int   i;
+
+	tess.vkEnvOffset = 0;
+
+	for (i = 0; i < MAX_SHADER_STAGES && tess.shader->stages[i] && tess.shader->stages[i]->active; i++)
+	{
+		if (tess.shader->stages[i]->bundle[0].tcGen == TCGEN_ENVIRONMENT_MAPPED)
+		{
+			break;
+		}
+	}
+	if (i == MAX_SHADER_STAGES || !tess.shader->stages[i] || !tess.shader->stages[i]->active)
+	{
+		return;
+	}
+
+	dst = VK_AllocEnvParams(&tess.vkEnvOffset);
+	if (!dst)
+	{
+		return;
+	}
+
+	sAdjust = VectorLength(backEnd.orientation.origin) * 0.00390625;
+	sAdjust = 0.5 -  (sAdjust - floor(sAdjust));
+
+	tAdjust = backEnd.orientation.origin[2] * 0.00390625;
+	tAdjust = 0.5 - (tAdjust - floor(tAdjust));
+
+	// built in CPU memory (merged model batches copy it) and copied to the
+	// uniform arena
+	p[0]  = backEnd.orientation.viewOrigin[0];
+	p[1]  = backEnd.orientation.viewOrigin[1];
+	p[2]  = backEnd.orientation.viewOrigin[2];
+	p[3]  = sAdjust;
+	p[4]  = backEnd.orientation.axis[0][1] * 0.5f;
+	p[5]  = backEnd.orientation.axis[1][1] * 0.5f;
+	p[6]  = backEnd.orientation.axis[2][1] * 0.5f;
+	p[7]  = tAdjust;
+	p[8]  = backEnd.orientation.axis[0][2] * 0.5f;
+	p[9]  = backEnd.orientation.axis[1][2] * 0.5f;
+	p[10] = backEnd.orientation.axis[2][2] * 0.5f;
+	p[11] = 0.0f;
+
+	Com_Memcpy(dst, p, sizeof(tess.vkEnvParams));
+}
+
+/**
+ * @brief Forgets all registered MD3 surfaces (R_ModelInit: the models are
+ * loaded again and VK_ResetSkinBuffer empties the mesh buffer).
+ */
+void R_VkMeshReset(void)
+{
+	Com_Memset(vkMeshMap, 0, sizeof(vkMeshMap));
+}
+
+/**
+ * @brief Uploads an MD3 surface's frames, texture coords and triangles to
+ * the mesh buffer and registers it for RB_SurfaceMeshGPU. A surface that
+ * doesn't fit stays interpolated on the CPU.
+ */
+void R_VkMeshRegister(md3Surface_t *surf)
+{
+	int xyzOfs, stOfs, indexOfs;
+
+	if (surf->numVerts <= 0 || surf->numFrames <= 0 || surf->numTriangles <= 0)
+	{
+		return;
+	}
+
+	xyzOfs   = VK_WriteMeshData((byte *)surf + surf->ofsXyzNormals, surf->numFrames * surf->numVerts * (int)sizeof(md3XyzNormal_t));
+	stOfs    = VK_WriteMeshData((byte *)surf + surf->ofsSt, surf->numVerts * (int)sizeof(md3St_t));
+	indexOfs = VK_WriteMeshData((byte *)surf + surf->ofsTriangles, surf->numTriangles * 3 * (int)sizeof(int));
+	if (xyzOfs < 0 || stOfs < 0 || indexOfs < 0)
+	{
+		return;
+	}
+
+	R_VkMeshInsert(surf, xyzOfs, -1, stOfs, indexOfs);
+}
+
+/**
+ * @brief R_VkMeshRegister() for an MDC surface: its base frames, compressed
+ * frames, texture coords and triangles (the frame -> base/compressed frame
+ * maps stay on the CPU, RB_SurfaceCMeshGPU reads them per draw).
+ */
+void R_VkMeshRegisterMDC(mdcSurface_t *surf)
+{
+	int xyzOfs, compOfs = -1, stOfs, indexOfs;
+
+	if (surf->numVerts <= 0 || surf->numBaseFrames <= 0 || surf->numTriangles <= 0)
+	{
+		return;
+	}
+
+	xyzOfs = VK_WriteMeshData((byte *)surf + surf->ofsXyzNormals, surf->numBaseFrames * surf->numVerts * (int)sizeof(md3XyzNormal_t));
+	if (surf->numCompFrames > 0)
+	{
+		compOfs = VK_WriteMeshData((byte *)surf + surf->ofsXyzCompressed, surf->numCompFrames * surf->numVerts * (int)sizeof(mdcXyzCompressed_t));
+		if (compOfs < 0)
+		{
+			return;
+		}
+	}
+	stOfs    = VK_WriteMeshData((byte *)surf + surf->ofsSt, surf->numVerts * (int)sizeof(md3St_t));
+	indexOfs = VK_WriteMeshData((byte *)surf + surf->ofsTriangles, surf->numTriangles * 3 * (int)sizeof(int));
+	if (xyzOfs < 0 || stOfs < 0 || indexOfs < 0)
+	{
+		return;
+	}
+
+	R_VkMeshInsert(surf, xyzOfs, compOfs, stOfs, indexOfs);
+}
+
+/**
+ * @brief Vulkan: draws this MD3 surface interpolated in the vertex shader
+ * (tr3d_md3.vert) from the mesh buffer: no tess vertices or indexes, a batch
+ * of its own (its frames). Same conditions as GPU skinning
+ * (RB_MDM_SurfaceAnimGPU), plus the frames must exist in the surface.
+ * @return qfalse if the surface must be interpolated on the CPU
+ */
+static qboolean RB_SurfaceMeshGPU(md3Surface_t *surface, float backlerp)
+{
+	const refEntity_t   *e = &backEnd.currentEntity->e;
+	const vkMeshEntry_t *entry;
+	unsigned int        frameBytes;
+
+	if (!r_vkGpuVertex->integer || !tess.shader->vkSkinnable || tess.shader == tr.shadowShader || !RB_VkModelFogOk() ||
+	    backEnd.projection2D || (e->fadeStartTime && e->fadeStartTime <= tr.refdef.time) ||
+	    r_showTris->integer || r_showNormals->integer || r_debugShaderSurfaceFlags->integer ||
+	    e->frame < 0 || e->frame >= surface->numFrames || e->oldframe < 0 || e->oldframe >= surface->numFrames)
+	{
+		return qfalse;
+	}
+
+	entry = R_VkMeshFind(surface);
+	if (!entry)
+	{
+		return qfalse;
+	}
+
+	// one surface per batch: its frames
+	if (tess.numIndexes || tess.numVertexes)
+	{
+		RB_EndStaticBatch();
+	}
+
+	frameBytes            = (unsigned int)surface->numVerts * sizeof(md3XyzNormal_t);
+	tess.vkMesh           = qtrue;
+	tess.vkMeshFlags      = 0;
+	tess.vkMeshNewOfs     = (unsigned int)entry->xyzOfs + (unsigned int)e->frame * frameBytes;
+	tess.vkMeshOldOfs     = (unsigned int)entry->xyzOfs + (unsigned int)e->oldframe * frameBytes;
+	tess.vkMeshNewCompOfs = tess.vkMeshNewOfs; // unused, any valid offset
+	tess.vkMeshOldCompOfs = tess.vkMeshOldOfs;
+	tess.vkMeshStOfs      = (unsigned int)entry->stOfs;
+	tess.vkMeshIndexOfs   = (unsigned int)entry->indexOfs;
+	tess.numIndexes       = surface->numTriangles * 3;
+	RB_VkSetupEnvParams();
+
+	// LerpMeshVertexes_scalar()'s scales
+	tess.vkMeshLerp[0] = MD3_XYZ_SCALE * (1.0 - backlerp);
+	tess.vkMeshLerp[1] = MD3_XYZ_SCALE * backlerp;
+	tess.vkMeshLerp[2] = 1.0f - backlerp;
+	tess.vkMeshLerp[3] = (backlerp == 0.f) ? -1.0f : backlerp;
+
+	return qtrue;
+}
+
 /**
  * @brief RB_SurfaceMesh
  * @param[in] surface
@@ -1189,6 +1712,11 @@ void RB_SurfaceMesh(md3Surface_t *surface)
 	else
 	{
 		backlerp = backEnd.currentEntity->e.backlerp;
+	}
+
+	if (RB_SurfaceMeshGPU(surface, backlerp))
+	{
+		return;
 	}
 
 	RB_CHECKOVERFLOW(surface->numVerts, surface->numTriangles * 3);
@@ -1240,6 +1768,78 @@ void R_LatLongToNormal(vec3_t outNormal, short latLong)
 	outNormal[2] = tr.sinTable[(lng + (FUNCTABLE_SIZE / 4)) & FUNCTABLE_MASK];
 }
 */
+
+/**
+ * @brief Vulkan: RB_SurfaceMeshGPU() for an MDC surface: the entity's frame
+ * and oldframe map to base frames (frameBaseFrames) and, where present,
+ * compressed frames (frameCompFrames) whose offsets and normals
+ * tr3d_md3.vert adds as LerpCMeshVertexes() does.
+ * @return qfalse if the surface must be interpolated on the CPU
+ */
+static qboolean RB_SurfaceCMeshGPU(mdcSurface_t *surface, float backlerp)
+{
+	const refEntity_t   *e = &backEnd.currentEntity->e;
+	const vkMeshEntry_t *entry;
+	const short         *baseFrames = (const short *)((byte *)surface + surface->ofsFrameBaseFrames);
+	const short         *compFrames = (const short *)((byte *)surface + surface->ofsFrameCompFrames);
+	unsigned int        frameBytes, compBytes;
+
+	if (!r_vkGpuVertex->integer || !tess.shader->vkSkinnable || tess.shader == tr.shadowShader || !RB_VkModelFogOk() ||
+	    backEnd.projection2D || (e->fadeStartTime && e->fadeStartTime <= tr.refdef.time) ||
+	    r_showTris->integer || r_showNormals->integer || r_debugShaderSurfaceFlags->integer ||
+	    e->frame < 0 || e->oldframe < 0)
+	{
+		return qfalse;
+	}
+
+	entry = R_VkMeshFind(surface);
+	if (!entry || baseFrames[e->frame] < 0 || baseFrames[e->frame] >= surface->numBaseFrames ||
+	    baseFrames[e->oldframe] < 0 || baseFrames[e->oldframe] >= surface->numBaseFrames)
+	{
+		return qfalse;
+	}
+
+	// one surface per batch: its frames
+	if (tess.numIndexes || tess.numVertexes)
+	{
+		RB_EndStaticBatch();
+	}
+
+	frameBytes            = (unsigned int)surface->numVerts * sizeof(md3XyzNormal_t);
+	compBytes             = (unsigned int)surface->numVerts * sizeof(mdcXyzCompressed_t);
+	tess.vkMesh           = qtrue;
+	tess.vkMeshFlags      = VK_MESH_MDC;
+	tess.vkMeshNewOfs     = (unsigned int)entry->xyzOfs + (unsigned int)baseFrames[e->frame] * frameBytes;
+	tess.vkMeshOldOfs     = (unsigned int)entry->xyzOfs + (unsigned int)baseFrames[e->oldframe] * frameBytes;
+	tess.vkMeshNewCompOfs = tess.vkMeshNewOfs; // unused unless flagged, any valid offset
+	tess.vkMeshOldCompOfs = tess.vkMeshOldOfs;
+	if (surface->numCompFrames > 0 && entry->compOfs >= 0)
+	{
+		if (compFrames[e->frame] >= 0)
+		{
+			tess.vkMeshFlags     |= VK_MESH_NEW_COMP;
+			tess.vkMeshNewCompOfs = (unsigned int)entry->compOfs + (unsigned int)compFrames[e->frame] * compBytes;
+		}
+		if (compFrames[e->oldframe] >= 0)
+		{
+			tess.vkMeshFlags     |= VK_MESH_OLD_COMP;
+			tess.vkMeshOldCompOfs = (unsigned int)entry->compOfs + (unsigned int)compFrames[e->oldframe] * compBytes;
+		}
+	}
+	tess.vkMeshStOfs    = (unsigned int)entry->stOfs;
+	tess.vkMeshIndexOfs = (unsigned int)entry->indexOfs;
+	tess.numIndexes     = surface->numTriangles * 3;
+	RB_VkSetupEnvParams();
+
+	// LerpCMeshVertexes()'s scales (the compressed offsets use 1 - backlerp
+	// and backlerp, the normal scales)
+	tess.vkMeshLerp[0] = MD3_XYZ_SCALE * (1.0 - backlerp);
+	tess.vkMeshLerp[1] = MD3_XYZ_SCALE * backlerp;
+	tess.vkMeshLerp[2] = 1.0f - backlerp;
+	tess.vkMeshLerp[3] = (backlerp == 0.f) ? -1.0f : backlerp;
+
+	return qtrue;
+}
 
 /**
  * @brief LerpCMeshVertexes
@@ -1433,6 +2033,11 @@ void RB_SurfaceCMesh(mdcSurface_t *surface)
 		backlerp = backEnd.currentEntity->e.backlerp;
 	}
 
+	if (RB_SurfaceCMeshGPU(surface, backlerp))
+	{
+		return;
+	}
+
 	RB_CHECKOVERFLOW(surface->numVerts, surface->numTriangles * 3);
 
 	LerpCMeshVertexes(surface, backlerp);
@@ -1576,6 +2181,12 @@ void RB_SurfaceGrid(srfGridMesh_t *cv)
 	int           numVertexes;
 	int           dlightBits = cv->dlightBits;
 	qboolean      needsNormal;
+
+	// patches share shaders with the static world surfaces around them
+	if (tess.vkStatic || tess.vkFoliage)
+	{
+		RB_EndStaticBatch();
+	}
 
 	tess.dlightBits |= dlightBits;
 
@@ -1731,19 +2342,17 @@ void RB_SurfaceAxis(void)
 {
 	GL_Bind(tr.whiteImage);
 	GL_State(GLS_DEFAULT);
-	glLineWidth(3);
-	glBegin(GL_LINES);
-	glColor3f(1, 0, 0);
-	glVertex3f(0, 0, 0);
-	glVertex3f(16, 0, 0);
-	glColor3f(0, 1, 0);
-	glVertex3f(0, 0, 0);
-	glVertex3f(0, 16, 0);
-	glColor3f(0, 0, 1);
-	glVertex3f(0, 0, 0);
-	glVertex3f(0, 0, 16);
-	glEnd();
-	glLineWidth(1);
+	VKimm_Begin(GL_LINES);
+	VKimm_Color3f(1, 0, 0);
+	VKimm_Vertex3f(0, 0, 0);
+	VKimm_Vertex3f(16, 0, 0);
+	VKimm_Color3f(0, 1, 0);
+	VKimm_Vertex3f(0, 0, 0);
+	VKimm_Vertex3f(0, 16, 0);
+	VKimm_Color3f(0, 0, 1);
+	VKimm_Vertex3f(0, 0, 0);
+	VKimm_Vertex3f(0, 0, 16);
+	VKimm_End();
 }
 
 //===========================================================================
@@ -1872,7 +2481,8 @@ void RB_SurfaceDisplayList(srfDisplayList_t *surf)
 {
 	// all apropriate state must be set in RB_BeginSurface
 	// this isn't implemented yet...
-	glCallList(surf->listNum);
+#ifndef __EMSCRIPTEN__
+#endif
 }
 
 /**
@@ -1948,6 +2558,24 @@ void RB_SurfaceSkip(void *surf)
 	return;
 }
 
+/**
+ * @brief Vulkan: a GPU-culled world group (R_VkBuildWorldCull) as a static
+ * batch of its own, drawn with the view's indirect command for the group:
+ * no tess vertices or indexes, numIndexes only marks the batch non-empty.
+ */
+static void RB_SurfaceVkWorldGroup(vkWorldGroup_t *group)
+{
+	if (tess.numIndexes || tess.numVertexes)
+	{
+		RB_EndStaticBatch();
+	}
+
+	tess.vkStatic         = qtrue;
+	tess.vkIndirect       = qtrue;
+	tess.vkIndirectOffset = VK_CullCommandOffset(backEnd.viewParms.vkCullView, group->index);
+	tess.numIndexes       = 3;
+}
+
 void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES]) (void *) =
 {
 	(void (*)(void *)) RB_SurfaceBad,               // SF_BAD,
@@ -1966,4 +2594,5 @@ void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES]) (void *) =
 	(void (*)(void *)) RB_SurfaceDisplayList,       // SF_DISPLAY_LIST
 	(void (*)(void *)) RB_SurfacePolyBuffer,        // SF_POLYBUFFER
 	(void (*)(void *)) RB_SurfaceDecal,             // SF_DECAL
+	(void (*)(void *)) RB_SurfaceVkWorldGroup,      // SF_VK_WORLDGROUP
 };

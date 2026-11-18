@@ -34,12 +34,28 @@ Use these settings:
   - `8-bit` unsigned PCM, or
   - `16-bit` little-endian PCM
 - Channels: `1` (mono) or `2` (stereo)
-- Sample rate: commonly `22050` Hz or `44100` Hz
+- Sample rate (anything else will produce an engine warning):
+  - For ordinary sounds: `11025` Hz or `22050` Hz or `44100` Hz
+  - For streaming sounds (e.g. music): `22050` Hz
+- Avoid ADPCM/float/compressed WAV variants if you need strict 2.60b compatibility
 
-Recommended for music/streaming tracks:
+### `.pk3` Archives
 
-- `22050` Hz stereo PCM WAV (this is the classic ET expectation and avoids warnings in the sound streamer path)
+Standard ZIP archives with the following constraints:
 
-Notes:
+- **Compression**
+  - Stored (ZIP method 0): No compression
+  - Deflate (ZIP method 8): Standard DEFLATE, compression levels 1–9
 
-- Avoid ADPCM/float/compressed WAV variants if you need strict 2.60b compatibility.
+- **ZIP64:** Unsupported, ZIP 32-bit only, which means:
+  - Maximum archive/member size: engine support up to 2 GiB
+  - Maximum entries: 65,535
+
+- **Encryption:** Unsupported.
+
+- **Paths and Filenames**
+  - Keep the full path (including directories and filename) below 64 bytes for
+    maximum compatibility
+  - Case-insensitive filesystem lookups (files are lowercased, duplicate names
+    within a PK3 resolve to the last entry in ZIP central-directory order, last
+    one wins)

@@ -1441,15 +1441,14 @@ void ClientThink_real(gentity_t *ent)
 	VectorCopy(ent->r.mins, pm.mins);
 	VectorCopy(ent->r.maxs, pm.maxs);
 
-	pm.gametype           = g_gametype.integer;
-	pm.ltChargeTime       = level.fieldopsChargeTime[client->sess.sessionTeam - 1];
-	pm.soldierChargeTime  = level.soldierChargeTime[client->sess.sessionTeam - 1];
-	pm.engineerChargeTime = level.engineerChargeTime[client->sess.sessionTeam - 1];
-	pm.medicChargeTime    = level.medicChargeTime[client->sess.sessionTeam - 1];
+	pm.gametype            = g_gametype.integer;
+	pm.ltChargeTime        = level.fieldopsChargeTime[client->sess.sessionTeam - 1];
+	pm.soldierChargeTime   = level.soldierChargeTime[client->sess.sessionTeam - 1];
+	pm.engineerChargeTime  = level.engineerChargeTime[client->sess.sessionTeam - 1];
+	pm.medicChargeTime     = level.medicChargeTime[client->sess.sessionTeam - 1];
+	pm.covertopsChargeTime = level.covertopsChargeTime[client->sess.sessionTeam - 1];
 
 	pm.skill = client->sess.skill;
-
-	pm.covertopsChargeTime = level.covertopsChargeTime[client->sess.sessionTeam - 1];
 
 	if (client->ps.pm_type != PM_DEAD && level.timeCurrent - client->pers.lastBattleSenseBonusTime > 45000)
 	{
@@ -1711,6 +1710,7 @@ void ClientThink(int clientNum)
 		}
 		else
 		{
+			ent->client->realCmdServerTime = newcmd.serverTime;
 			ClientThink_cmd(ent, &newcmd);
 		}
 	}
@@ -2206,6 +2206,14 @@ void ClientEndFrame(gentity_t *ent)
 
 	if ((ent->client->sess.sessionTeam == TEAM_SPECTATOR) || (ent->client->ps.pm_flags & PMF_LIMBO))
 	{
+		// Limbo players skip the pause compensation below; shift their charge
+		// timestamps as well so paused frames never count as recharge.
+		if (level.match_pause != PAUSE_NONE && (ent->client->ps.pm_flags & PMF_LIMBO))
+		{
+			ent->client->ps.classWeaponTime += level.frameTime;
+			ent->client->deathTime          += level.frameTime;
+		}
+
 		SpectatorClientEndFrame(ent);
 		return;
 	}
@@ -2288,6 +2296,13 @@ void ClientEndFrame(gentity_t *ent)
 		ent->lastHintCheckTime  += level.frameTime;
 		ent->pain_debounce_time += level.frameTime;
 		ent->s.onFireEnd        += level.frameTime;
+
+		// dead players anchor the sticky charge respawn reconstruction on
+		// deathTime, keep it in sync so paused frames never count as recharge
+		if (ent->client->ps.stats[STAT_HEALTH] <= 0)
+		{
+			ent->client->deathTime += level.frameTime;
+		}
 	}
 
 	// save network bandwidth

@@ -568,11 +568,7 @@ static ID_INLINE uint64_t _vmu64(void *value)
 
 #define VMU64(x) _vmu64(VMA(x))
 
-#ifdef __EMSCRIPTEN__
-typedef intptr_t (QDECL *VM_EntryPoint_t)(int, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
-#else
 typedef intptr_t (QDECL *VM_EntryPoint_t)(int, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
-#endif
 
 /*
 ==============================================================
@@ -588,6 +584,7 @@ files can be execed.
 
 void Cbuf_Init(void); ///< allocates an initial text buffer that will grow as needed
 
+void Cbuf_SetWait(int count); ///< Delays the remaining command buffer by this many executions, 0 releases it
 void Cbuf_AddText(const char *text); ///< Adds command text at the end of the buffer, does NOT add a final \n
 
 void Cbuf_ExecuteText(int exec_when, const char *text); ///< this can be used in place of either Cbuf_AddText or Cbuf_InsertText
@@ -608,6 +605,8 @@ typedef void (*xcommand_t)(void);
 typedef void (*completionFunc_t)(char *args, int argNum);
 
 void Cmd_Init(void);
+
+extern qboolean cmd_inExec; ///< Current command comes from an exec script.
 
 #define GET_MACRO(_1, _2, _3, _4, NAME, ...) NAME
 #define Cmd_AddCommand1(x) Cmd_AddSystemCommand(x, NULL, NULL, NULL)
@@ -889,6 +888,9 @@ long FS_FOpenFileRead_Filtered(const char *qpath, fileHandle_t *file, qboolean u
 // returns 1 if a file is in the PAK file, otherwise -1
 int FS_FileIsInPAK(const char *fileName, int *pChecksum);
 
+// returns the checksum of the PAK file a file is read from, 0 if outside of PAK files, -1 if not found
+int FS_FilePakChecksum(const char *fileName);
+
 int FS_Delete(const char *fileName);
 
 int FS_Write(const void *buffer, int len, fileHandle_t h);
@@ -901,6 +903,7 @@ int FS_Read(void *buffer, int len, fileHandle_t f);
 // properly handles partial reads and reads from other dlls
 
 void FS_FCloseFile(fileHandle_t f);
+int FS_FClosePipe(fileHandle_t f);
 // note: you can't just fclose from another DLL, due to MS libc issues
 
 int FS_ReadFile(const char *qpath, void **buffer);
@@ -1058,6 +1061,8 @@ void QDECL Com_Printf(const char *fmt, ...) _attribute((format(printf, 1, 2)));
 void QDECL Com_DPrintf(const char *fmt, ...) _attribute((format(printf, 1, 2)));
 NORETURN_MSVC void QDECL Com_Error(int code, const char *fmt, ...) _attribute((noreturn, format(printf, 2, 3)));
 NORETURN_MSVC void Com_Quit_f(void) _attribute((noreturn));
+void Com_SetExitCode(int code);
+int Com_ExitCode(void);
 
 int Com_Milliseconds(void);     // will be journaled properly
 int64_t Com_Microseconds(void);
@@ -1079,6 +1084,8 @@ void Com_SetRecommended(void);
 // checks for and removes command line "+set var arg" constructs
 // if match is NULL, all set commands will be executed, otherwise
 // only a set with the exact name.  Only used during startup.
+
+extern qboolean com_noConfigWrite;
 
 // profile functions
 void Com_TrackProfile(const char *profile_path);
@@ -1462,6 +1469,7 @@ int Sys_Stat(const char *path, void *stat);
 int Sys_Rename(const char *from, const char *to);
 char *Sys_RealPath(const char *path);
 #define Sys_PathAbsolute(name) (name && strlen(name) > 3 && name[1] == ':' && (name[2] == '\\' || name[2] == '/'))
+FILE *Sys_Popen(const char *command, const char *mode);
 #else
 #include <unistd.h>
 #define Sys_Remove(x) remove(x)
@@ -1474,6 +1482,7 @@ char *Sys_RealPath(const char *path);
 #define sys_stat_t struct stat
 #define Sys_Stat(osPath, statBuf) stat(osPath, statBuf)
 #define Sys_S_IsDir(m) S_ISDIR(m)
+#define Sys_Popen(command, mode) popen((command), (mode))
 #endif
 
 char *Sys_Cwd(void);

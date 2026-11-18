@@ -118,6 +118,7 @@ vmCvar_t cg_dynamicIconsDistance;
 vmCvar_t cg_dynamicIconsSize;
 vmCvar_t cg_dynamicIconsMaxScale;
 vmCvar_t cg_dynamicIconsMinScale;
+vmCvar_t cg_compassIconsEdgeScale;
 
 vmCvar_t cg_autoactivate;
 
@@ -328,6 +329,7 @@ vmCvar_t cg_scopeReticleLineThickness;
 vmCvar_t cg_scopeReticleDotThickness;
 
 vmCvar_t cg_commandMapTime;
+vmCvar_t cg_windowTime;
 
 typedef struct
 {
@@ -397,6 +399,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_dynamicIconsSize,                   "cg_dynamicIconsSize",                   "20",          CVAR_ARCHIVE,                 0 },
 	{ &cg_dynamicIconsMaxScale,               "cg_dynamicIconsMaxScale",               "1.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_dynamicIconsMinScale,               "cg_dynamicIconsMinScale",               "0.5",         CVAR_ARCHIVE,                 0 },
+	{ &cg_compassIconsEdgeScale,              "cg_compassIconsEdgeScale",              "1.0",         CVAR_ARCHIVE,                 0 },
 
 	{ &cg_autoactivate,                       "cg_autoactivate",                       "1",           CVAR_ARCHIVE,                 0 },
 
@@ -640,6 +643,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_scopeReticleDotThickness,           "cg_scopeReticleDotThickness",           "2.0",         CVAR_ARCHIVE,                 0 },
 
 	{ &cg_commandMapTime,                     "cg_commandMapTime",                     "0",           CVAR_ARCHIVE,                 0 },
+	{ &cg_windowTime,                         "cg_windowTime",                         "200",         CVAR_ARCHIVE,                 0 },
 };
 
 static const unsigned int cvarTableSize = sizeof(cvarTable) / sizeof(cvarTable[0]);
@@ -801,9 +805,9 @@ void CG_UpdateCvars(void)
 				{
 					if (demo_infoWindow.integer == 0 && cg.demohelpWindow == SHOW_ON)
 					{
-						CG_ShowHelp_On(&cg.demohelpWindow);
+						CG_ShowHelp_Off(&cg.demohelpWindow);
 					}
-					else if (demo_infoWindow.integer > 0 && cg.demohelpWindow != SHOW_ON)
+					else if (demo_infoWindow.integer > 0 && cg.demohelpWindow != SHOW_ON && !CG_DemoBarAvailable())
 					{
 						CG_ShowHelp_On(&cg.demohelpWindow);
 					}

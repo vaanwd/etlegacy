@@ -234,6 +234,7 @@ static void R_LoadLightmaps(lump_t *l)
 	// clear lightmaps first
 	tr.numLightmaps = 0;
 	Com_Memset(tr.lightmaps, 0, sizeof(*tr.lightmaps) * MAX_LIGHTMAPS);
+	Com_Memset(tr.lightmapFailed, 0, sizeof(tr.lightmapFailed));
 
 	len = l->filelen;
 	if (!len)
@@ -545,11 +546,12 @@ static void ParseTriSurf(dsurface_t *ds, drawVert_t *verts, msurface_t *surf, in
 	tri = R_GetSurfMemory(sizeof(*tri) + numVerts * sizeof(tri->verts[0])
 	                      + numIndexes * sizeof(tri->indexes[0]));
 
-	tri->surfaceType = SF_TRIANGLES;
-	tri->numVerts    = numVerts;
-	tri->numIndexes  = numIndexes;
-	tri->verts       = ( drawVert_t * )(tri + 1);
-	tri->indexes     = ( int * )(tri->verts + tri->numVerts);
+	tri->surfaceType   = SF_TRIANGLES;
+	tri->numVerts      = numVerts;
+	tri->numIndexes    = numIndexes;
+	tri->verts         = ( drawVert_t * )(tri + 1);
+	tri->indexes       = ( int * )(tri->verts + tri->numVerts);
+	tri->vkFirstVertex = -1;
 
 	surf->data = (surfaceType_t *)tri;
 
@@ -631,16 +633,18 @@ static void ParseFoliage(dsurface_t *ds, drawVert_t *verts, msurface_t *surf, in
 	foliage = R_GetSurfMemory(size);
 
 	// set up surface
-	foliage->surfaceType  = SF_FOLIAGE;
-	foliage->numVerts     = numVerts;
-	foliage->numIndexes   = numIndexes;
-	foliage->numInstances = numInstances;
-	foliage->xyz          = ( vec4_t * )(foliage + 1);
-	foliage->normal       = ( vec4_t * )(foliage->xyz + foliage->numVerts);
-	foliage->texCoords    = ( vec2_t * )(foliage->normal + foliage->numVerts);
-	foliage->lmTexCoords  = ( vec2_t * )(foliage->texCoords + foliage->numVerts);
-	foliage->indexes      = ( unsigned int * )(foliage->lmTexCoords + foliage->numVerts);
-	foliage->instances    = ( foliageInstance_t * )(foliage->indexes + foliage->numIndexes);
+	foliage->surfaceType     = SF_FOLIAGE;
+	foliage->numVerts        = numVerts;
+	foliage->numIndexes      = numIndexes;
+	foliage->numInstances    = numInstances;
+	foliage->xyz             = ( vec4_t * )(foliage + 1);
+	foliage->normal          = ( vec4_t * )(foliage->xyz + foliage->numVerts);
+	foliage->texCoords       = ( vec2_t * )(foliage->normal + foliage->numVerts);
+	foliage->lmTexCoords     = ( vec2_t * )(foliage->texCoords + foliage->numVerts);
+	foliage->indexes         = ( unsigned int * )(foliage->lmTexCoords + foliage->numVerts);
+	foliage->instances       = ( foliageInstance_t * )(foliage->indexes + foliage->numIndexes);
+	foliage->vkFirstVertex   = -1;
+	foliage->vkFirstInstance = -1;
 
 	surf->data = (surfaceType_t *) foliage;
 
@@ -1972,6 +1976,144 @@ static void R_LoadSurfaces(lump_t *surfs, lump_t *verts, lump_t *indexLump)
 }
 
 /**
+ * @brief Copies every surface's type and culling information (srfGeneric_t:
+ * bounding sphere, plane) into its msurface_t, where R_CullSurface() reads
+ * it. Runs after R_LoadSurfaces(), once patch stitching has replaced the
+ * grid surfaces' data for good.
+ */
+static void R_LoadSurfaceCullData(void)
+{
+	msurface_t   *surf;
+	srfGeneric_t *gen;
+	int          i;
+
+	for (i = 0, surf = s_worldData.surfaces; i < s_worldData.numsurfaces; i++, surf++)
+	{
+		surf->cullSurfaceType = surf->data ? *surf->data : SF_BAD;
+		surf->cullPlaneType   = PLANE_NON_PLANAR;
+
+		switch (surf->cullSurfaceType)
+		{
+		case SF_FACE:
+		case SF_TRIANGLES:
+		case SF_GRID:
+		case SF_FOLIAGE:
+			gen = (srfGeneric_t *)surf->data;
+			VectorCopy(gen->origin, surf->cullOrigin);
+			surf->cullRadius = gen->radius;
+			VectorCopy(gen->plane.normal, surf->cullNormal);
+			surf->cullDist      = gen->plane.dist;
+			surf->cullPlaneType = gen->plane.type;
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+/**
+ * @brief Vulkan: true if two foliage surfaces have the same model (q3map2
+ * writes a copy of it per surface), so their instances can share draws.
+ */
+static qboolean R_FoliageSameModel(const srfFoliage_t *a, const srfFoliage_t *b)
+{
+	return (a->numVerts == b->numVerts && a->numIndexes == b->numIndexes &&
+	        !memcmp(a->xyz, b->xyz, a->numVerts * sizeof(a->xyz[0])) &&
+	        !memcmp(a->texCoords, b->texCoords, a->numVerts * sizeof(a->texCoords[0])) &&
+	        !memcmp(a->lmTexCoords, b->lmTexCoords, a->numVerts * sizeof(a->lmTexCoords[0])) &&
+	        !memcmp(a->indexes, b->indexes, a->numIndexes * sizeof(a->indexes[0]))) ? qtrue : qfalse;
+}
+
+#define MAX_FOLIAGE_MODELS 256
+
+/**
+ * @brief Vulkan: copies the vertices of every triangle surface (planar faces
+ * and triangle soups, world and brush models) into one static GPU vertex
+ * buffer, so RB_SurfaceTriangles() only has to emit indexes for them, and
+ * the foliage models, which RB_SurfaceFoliage() draws instanced.
+ */
+static void R_LoadStaticWorldVertices(void)
+{
+	msurface_t     *surf;
+	srfTriangles_t *tri;
+	srfFoliage_t   *foliage, *models[MAX_FOLIAGE_MODELS];
+	int            i, j, numVertexes = 0, numModels = 0, numInstances = 0;
+
+	for (i = 0, surf = s_worldData.surfaces; i < s_worldData.numsurfaces; i++, surf++)
+	{
+		if (surf->data && *surf->data == SF_TRIANGLES)
+		{
+			numVertexes += ((srfTriangles_t *)surf->data)->numVerts;
+		}
+		else if (surf->data && *surf->data == SF_FOLIAGE)
+		{
+			numVertexes  += ((srfFoliage_t *)surf->data)->numVerts;
+			numInstances += ((srfFoliage_t *)surf->data)->numInstances;
+		}
+	}
+
+	if (!VK_CreateStaticWorldBuffer(numVertexes))
+	{
+		return;
+	}
+
+	// foliage instances, in surface order: consecutive surfaces with the same
+	// model can share a draw
+	if (VK_CreateFoliageInstanceBuffer(numInstances))
+	{
+		numInstances = 0;
+		for (i = 0, surf = s_worldData.surfaces; i < s_worldData.numsurfaces; i++, surf++)
+		{
+			if (surf->data && *surf->data == SF_FOLIAGE)
+			{
+				foliage = (srfFoliage_t *)surf->data;
+				VK_WriteFoliageInstances(numInstances, foliage);
+				foliage->vkFirstInstance = numInstances;
+				numInstances            += foliage->numInstances;
+			}
+		}
+	}
+
+	numVertexes = 0;
+	for (i = 0, surf = s_worldData.surfaces; i < s_worldData.numsurfaces; i++, surf++)
+	{
+		if (surf->data && *surf->data == SF_TRIANGLES)
+		{
+			tri = (srfTriangles_t *)surf->data;
+			VK_WriteStaticWorldVertices(numVertexes, tri->verts, tri->numVerts);
+			tri->vkFirstVertex = numVertexes;
+			numVertexes       += tri->numVerts;
+		}
+		else if (surf->data && *surf->data == SF_FOLIAGE)
+		{
+			foliage = (srfFoliage_t *)surf->data;
+			for (j = 0; j < numModels; j++)
+			{
+				if (R_FoliageSameModel(foliage, models[j]))
+				{
+					break;
+				}
+			}
+			if (j < numModels)
+			{
+				foliage->vkFirstVertex = models[j]->vkFirstVertex;
+				continue;
+			}
+
+			VK_WriteStaticFoliageVertices(numVertexes, foliage);
+			foliage->vkFirstVertex = numVertexes;
+			numVertexes           += foliage->numVerts;
+			if (numModels < MAX_FOLIAGE_MODELS)
+			{
+				models[numModels++] = foliage;
+			}
+		}
+	}
+
+	Ren_Developer("...static world buffer: %i vertexes, %i foliage models, %i foliage instances\n", numVertexes, numModels, numInstances);
+}
+
+/**
  * @brief R_LoadSubmodels
  * @param[in] l
  */
@@ -2492,7 +2634,7 @@ void R_LoadEntities(lump_t *l)
 
 	// store for reference by the cgame
 	w->entityString = ri.Hunk_Alloc(l->filelen + 1, h_low);
-	Q_strncpyz(w->entityString, p, sizeof(l->filelen + 1));
+	Q_strncpyz(w->entityString, p, l->filelen + 1);
 	w->entityParsePoint = w->entityString;
 
 	token = COM_ParseExt(&p, qtrue);
@@ -2653,6 +2795,7 @@ void RE_LoadWorldMap(const char *name)
 	tr.world = NULL;
 
 	Com_Memset(&s_worldData, 0, sizeof(s_worldData));
+	R_ClearPVSCache();
 	Q_strncpyz(s_worldData.name, name, sizeof(s_worldData.name));
 
 	Q_strncpyz(s_worldData.baseName, COM_SkipPath(s_worldData.name), sizeof(s_worldData.name));
@@ -2687,6 +2830,8 @@ void RE_LoadWorldMap(const char *name)
 	//% R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES] );
 	//% Ren_UpdateScreen();
 	R_LoadSurfaces(&header->lumps[LUMP_SURFACES], &header->lumps[LUMP_DRAWVERTS], &header->lumps[LUMP_DRAWINDEXES]);
+	R_LoadSurfaceCullData();
+	R_LoadStaticWorldVertices();
 	Ren_UpdateScreen();
 	R_LoadMarksurfaces(&header->lumps[LUMP_LEAFSURFACES]);
 	Ren_UpdateScreen();
@@ -2711,6 +2856,9 @@ void RE_LoadWorldMap(const char *name)
 	// only set tr.world now that we know the entire level has loaded properly
 	tr.world = &s_worldData;
 
+	// Vulkan: GPU world culling data (needs the leaves and the fogs)
+	R_VkBuildWorldCull();
+
 	// reset fog to world fog (if present)
 	R_SetFog(FOG_CMD_SWITCHFOG, FOG_MAP, 20, 0, 0, 0, 0);
 
@@ -2721,4 +2869,28 @@ void RE_LoadWorldMap(const char *name)
 	}
 
 	ri.FS_FreeFile(buffer);
+}
+
+/**
+ * @brief
+ * Finds a shader in the BSP Textures/Shaders Lump by name.
+ * see https://www.mralligator.com/q3/#Textures
+ * @return NULL if not found
+ */
+dshader_t *R_FindBspShaderByName(const char *name)
+{
+	int       i;
+	dshader_t *result;
+
+	// NOTE : Naive & slow implementation
+	for (i = 0; i < s_worldData.numShaders; ++i)
+	{
+		result = &s_worldData.shaders[i];
+		if (!Q_stricmp(result->shader, name))
+		{
+			return result;
+		}
+	}
+
+	return NULL;
 }

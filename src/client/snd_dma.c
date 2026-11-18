@@ -393,26 +393,57 @@ void S_DefaultSound(sfx_t *sfx)
 */
 
 /**
- * @brief S_Base_Reload
+ * @brief Gives the sound data back to the sound memory
+ * @param[in,out] sfx
+ */
+static void S_FreeSound(sfx_t *sfx)
+{
+	sndBuffer *buffer, *nbuffer;
+
+	buffer = sfx->soundData;
+	while (buffer != NULL)
+	{
+		nbuffer = buffer->next;
+		SND_Com_Dealloc(buffer);
+		buffer = nbuffer;
+	}
+	sfx->inMemory  = qfalse;
+	sfx->soundData = NULL;
+}
+
+/**
+ * @brief Drops the sounds whose file is now read from another pk3 file (server or mod change),
+ * they are loaded again on their next use
  */
 void S_Base_Reload(void)
 {
-	sfx_t *sfx;
-	int   i;
+	sfx_t    *sfx;
+	int      i;
+	qboolean stopped = qfalse;
 
 	if (!s_soundStarted)
 	{
 		return;
 	}
 
-	Com_Printf("reloading sounds...\n");
-
-	S_Base_StopAllSounds();
-
 	for (sfx = knownSfx, i = 0; i < numSfx; i++, sfx++)
 	{
-		sfx->inMemory = qfalse;
-		S_memoryLoad(sfx);
+		// player specific sounds are never directly loaded
+		if (!sfx->inMemory || sfx->soundName[0] == '*' || FS_FilePakChecksum(sfx->soundName) == sfx->pakChecksum)
+		{
+			continue;
+		}
+
+		if (!stopped)
+		{
+			S_Base_StopAllSounds();
+			stopped = qtrue;
+		}
+
+		Com_DPrintf("S_Base_Reload: %s changed\n", sfx->soundName);
+
+		S_FreeSound(sfx);
+		sfx->defaultSound = qfalse;
 	}
 }
 
@@ -833,11 +864,10 @@ void S_Base_ClearSounds(qboolean clearStreaming, qboolean clearMusic)
 	// and leave us with a snippet off streaming sounds after we reload
 	if (clearStreaming)
 	{
-		int              i;
-		streamingSound_t *ss;
-		channel_t        *ch;
+		int       i;
+		channel_t *ch;
 
-		for (i = 0, ss = streamingSounds; i < MAX_STREAMING_SOUNDS; i++, ss++)
+		for (i = 0; i < MAX_STREAMING_SOUNDS; i++)
 		{
 			if (i > 0 || clearMusic)
 			{
@@ -1570,22 +1600,37 @@ void S_Base_Update(void)
  */
 void S_GetSoundtime(void)
 {
-	int        samplepos;
-	static int buffers;
-	static int oldsamplepos;
-	int        fullsamples = dma.samples / dma.channels;
+	int             samplepos;
+	static int      buffers;
+	static int      oldsamplepos;
+	static double   aviSampleRemainder;
+	static qboolean videoClock;
+	int             fullsamples = dma.samples / dma.channels;
 
-	if (CL_VideoRecording())
+	// a video has its own clock: one frame's worth of samples per video frame. Start
+	// from what is already mixed, so that the video only gets what is mixed from now on
+	if (CL_VideoClocksSound())
 	{
-		float fps           = MIN(cl_aviFrameRate->integer, 1000.0f);
-		float frameDuration = MAX(dma.speed / fps, 1.0f); // +clc.aviSoundFrameRemainder;
+		float fps = MIN(cl_aviFrameRate->integer, 1000.0f);
+		int   step;
 
-		int msec = (int)frameDuration;
-		s_soundtime += msec;
-		//clc.aviSoundFrameRemainder = frameDuration - msec;
+		if (!videoClock)
+		{
+			videoClock         = qtrue;
+			aviSampleRemainder = 0.0;
+			s_soundtime        = s_paintedtime;
+		}
+
+		// carry the fraction, as at 40 fps a frame is 1102.5 samples at 44.1 kHz
+		aviSampleRemainder += MAX((double)dma.speed / (double)fps, 1.0);
+		step                = (int)floor(aviSampleRemainder + 1e-9);
+		aviSampleRemainder -= step;
+		s_soundtime        += step;
 
 		return;
 	}
+
+	videoClock = qfalse;
 
 	// it is possible to miscount buffers if it has wrapped twice between
 	// calls to S_Update.  Oh well.
@@ -1662,26 +1707,35 @@ void S_Update_(void)
 		sane = 11;          // 85hz
 	}
 
-	ma = s_mixahead->value * dma.speed;
-	op = s_mixOffset->value + sane * dma.speed * 0.01f;
-
-	if (op < ma)
+	// mix exactly up to the video's time, as the file gets everything that is mixed.
+	// Mixing ahead by the clock below would give each run a different audio length.
+	if (CL_VideoClocksSound())
 	{
-		ma = op;
+		endtime = s_soundtime;
 	}
-
-	// mix ahead of current position
-	endtime = s_soundtime + ma;
-
-	// mix to an even submission block size
-	endtime = (endtime + dma.submission_chunk - 1)
-	          & ~(dma.submission_chunk - 1);
-
-	// never mix more than the complete buffer
-	samps = dma.samples >> (dma.channels - 1);
-	if (endtime - s_soundtime > samps)
+	else
 	{
-		endtime = s_soundtime + samps;
+		ma = s_mixahead->value * dma.speed;
+		op = s_mixOffset->value + sane * dma.speed * 0.01f;
+
+		if (op < ma)
+		{
+			ma = op;
+		}
+
+		// mix ahead of current position
+		endtime = s_soundtime + ma;
+
+		// mix to an even submission block size
+		endtime = (endtime + dma.submission_chunk - 1)
+		          & ~(dma.submission_chunk - 1);
+
+		// never mix more than the complete buffer
+		samps = dma.samples >> (dma.channels - 1);
+		if (endtime - s_soundtime > samps)
+		{
+			endtime = s_soundtime + samps;
+		}
 	}
 
 	// global volume fading
@@ -2302,9 +2356,8 @@ void S_Base_PauseSounds(qboolean pause)
  */
 void S_FreeOldestSound(void)
 {
-	int       i, oldest, used = 0;
-	sfx_t     *sfx;
-	sndBuffer *buffer, *nbuffer;
+	int   i, oldest, used = 0;
+	sfx_t *sfx;
 
 	oldest = s_soundtime;
 
@@ -2322,15 +2375,7 @@ void S_FreeOldestSound(void)
 
 	Com_DPrintf("S_FreeOldestSound: freeing sound %s\n", sfx->soundName);
 
-	buffer = sfx->soundData;
-	while (buffer != NULL)
-	{
-		nbuffer = buffer->next;
-		SND_Com_Dealloc(buffer);
-		buffer = nbuffer;
-	}
-	sfx->inMemory  = qfalse;
-	sfx->soundData = NULL;
+	S_FreeSound(sfx);
 }
 
 // =======================================================================

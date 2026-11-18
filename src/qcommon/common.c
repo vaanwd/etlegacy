@@ -177,6 +177,7 @@ int     com_hunkusedvalue;
 
 qboolean com_errorEntered;
 qboolean com_fullyInitialized;
+qboolean com_noConfigWrite = qfalse;  // No automatic or scripted config writing for this session
 
 char com_errorMessage[MAX_PRINT_MSG];
 
@@ -461,6 +462,26 @@ void QDECL Com_Error(int code, const char *fmt, ...)
 	Com_Shutdown(code == ERR_VID_FATAL ? qtrue : qfalse);
 
 	Sys_Error("%s", com_errorMessage);
+}
+
+static int com_exitCode;
+
+/**
+ * @brief Sets the code the game exits with on a normal quit, for scripts running it
+ * @param[in] code
+ */
+void Com_SetExitCode(int code)
+{
+	com_exitCode = code;
+}
+
+/**
+ * @brief Com_ExitCode
+ * @return code to exit with on a normal quit
+ */
+int Com_ExitCode(void)
+{
+	return com_exitCode;
 }
 
 /**
@@ -3248,16 +3269,12 @@ void Com_Init(char *commandLine)
 
 	if (!com_dedicated->integer)
 	{
-#ifdef __EMSCRIPTEN__
-		Cvar_Set("com_introPlayed", "1");
-#else
 		// Don't play intro movie if already played
 		if (!com_introPlayed->integer)
 		{
 			Cbuf_AddText("cinematic etintro.roq\n");
 			Cvar_Set("com_introPlayed", "1");
 		}
-#endif
 	}
 
 #ifdef FEATURE_TRACKER
@@ -3308,6 +3325,11 @@ void Com_WriteConfiguration(void)
 		return;
 	}
 
+	if (com_noConfigWrite)
+	{
+		return;
+	}
+
 	if (!(cvar_modifiedFlags & CVAR_ARCHIVE))
 	{
 		return;
@@ -3336,6 +3358,13 @@ void Com_WriteConfig_f(void)
 	char     filename[MAX_QPATH];
 	int      arg        = 1;
 	qboolean nodefaults = qfalse;
+
+	// Explicit console writes remain available when automatic saving is disabled.
+	if (com_noConfigWrite && cmd_inExec)
+	{
+		Com_Printf("Config writing from exec disabled by --no-config-write.\n");
+		return;
+	}
 
 	if (Cmd_Argc() < 2)
 	{

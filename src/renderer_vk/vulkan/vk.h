@@ -1,0 +1,286 @@
+/*
+ * Wolfenstein: Enemy Territory GPL Source Code
+ * Copyright (C) 1999-2010 id Software LLC, a ZeniMax Media company.
+ *
+ * ET: Legacy
+ * Copyright (C) 2012-2024 ET:Legacy team <mail@etlegacy.com>
+ *
+ * This file is part of ET: Legacy - http://www.etlegacy.com
+ *
+ * ET: Legacy is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * ET: Legacy is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with ET: Legacy. If not, see <http://www.gnu.org/licenses/>.
+ *
+ * In addition, Wolfenstein: Enemy Territory GPL Source Code is also
+ * subject to certain additional terms. You should have received a copy
+ * of these additional terms immediately following the terms and conditions
+ * of the GNU General Public License which accompanied the source code.
+ * If not, please request a copy in writing from id Software at the address below.
+ *
+ * id Software LLC, c/o ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
+ */
+/**
+ * @file vulkan/vk.h
+ * @brief Vulkan backend interface: device/swapchain setup, frame begin/end,
+ * image uploads, 2D/3D draw submission, clears, fog, clip planes, stencil
+ * shadows and frame capture, called from the shared tr_*.c renderer code.
+ */
+
+#ifndef VK_H
+#define VK_H
+
+#include "../../qcommon/q_shared.h"
+
+/**
+ * @brief Creates the VkInstance, picks a physical device, creates the
+ * logical device + queues, the window surface (via ri.VKimp_CreateSurface)
+ * and the initial swapchain/render pass/framebuffers/command pool/sync
+ * objects for the given window size. Fills in glConfig's vendor/renderer/
+ * version strings and basic limits from the chosen physical device.
+ * @return qfalse on unrecoverable failure (caller should fall back / abort)
+ */
+qboolean VK_Init(int width, int height);
+
+/**
+ * @brief Tears down the swapchain/render pass/framebuffers/sync objects,
+ * the logical device, the surface and the instance, in that order. Safe to
+ * call even if VK_Init() only partially succeeded.
+ */
+void VK_Shutdown(void);
+
+/**
+ * @brief Recreates the swapchain/framebuffers for a new window size
+ * (window resize, display mode change, ...).
+ */
+qboolean VK_ResizeSwapchain(int width, int height);
+
+/**
+ * @brief Sets the render resolution of the offscreen scene targets
+ * (r_scale: glConfig.vidWidth/vidHeight after scaling) and recreates them
+ * if it changed. The gamma pass scales the scene to the window.
+ * @return qfalse if the targets could not be recreated
+ */
+qboolean VK_SetSceneSize(int width, int height);
+
+/**
+ * @brief Acquires the next swapchain image and begins recording the
+ * primary command buffer for this frame, starting the render pass with a
+ * clear-to-black (or r_clear colored) attachment load.
+ */
+void VK_BeginFrame(void);
+
+/**
+ * @brief Ends the render pass / command buffer, submits it, and presents
+ * the acquired swapchain image.
+ */
+void VK_EndFrame(void);
+
+/**
+ * @brief qtrue after a lost device or window surface until the queued
+ * vid_restart recreates the renderer; nothing is recorded meanwhile.
+ */
+qboolean VK_RestartPending(void);
+
+struct image_s;
+struct shaderCommands_s;
+
+/**
+ * @brief Uploads a 32-bit RGBA image (data holds mipLevels
+ * packed levels, see Upload32()) to a new device-local
+ * Vulkan texture + descriptor set, stored on the given
+ * image_t. Returns qfalse on failure (caller should treat the image as
+ * untextured / fall back to tr.whiteImage).
+ */
+qboolean VK_CreateImageTexture(struct image_s *image, const byte *data, int width, int height, int mipLevels, qboolean mipmap, int wrapClampMode,
+                               int internalFormat);
+
+/**
+ * @brief Rebuilds the mipmapped-image samplers for a new
+ * GL-style min/mag filter and rebinds existing images (GL_TextureMode).
+ */
+void VK_SetTextureMode(int minFilter, int magFilter);
+
+/**
+ * @brief Device max sampler anisotropy, 0 if unsupported.
+ */
+float VK_GetMaxAnisotropy(void);
+
+/**
+ * @brief Destroys the Vulkan resources created by VK_CreateImageTexture
+ * for the given image_t. Safe to call on an image that was never uploaded.
+ */
+void VK_DeleteImageTexture(struct image_s *image);
+
+/**
+ * @brief Frame capture for screenshots, levelshots and avi
+ * frames. Request, then after VK_EndFrame() read the final (post-gamma)
+ * image laid out like glReadPixels(GL_RGB) and release it.
+ */
+void VK_RequestFrameCapture(void);
+qboolean VK_GetCapturedFrameSize(int *width, int *height);
+void VK_ReadCapturedFrameRGB(byte *dst, int width, int height, int padlen);
+void VK_ReleaseCapturedFrame(void);
+
+/**
+ * @brief Active MSAA sample count (1 = off).
+ */
+int VK_GetSampleCount(void);
+
+/**
+ * @brief Immediate-mode style 3D draw (triangle or line
+ * list, per-vertex color/texcoord, GL state bits, two-sided).
+ */
+void VK_DrawImmediate3D(const float (*xyz)[4], const byte (*colors)[4], const float (*st)[2], int numVertexes,
+                        const unsigned int *indexes, int numIndexes, qboolean lines, struct image_s *image, unsigned long stateBits);
+
+/**
+ * @brief Updates (or recreates at a new size) a cinematic
+ * scratch image from raw RGBA data (RE_UploadCinematic).
+ */
+qboolean VK_UploadScratchImage(struct image_s *image, const byte *data, int cols, int rows);
+
+/**
+ * @brief Submits one already-tessellated 2D/UI shader batch
+ * (as populated by RB_StretchPic/RB_Draw2dPolys/etc. into tess) using the
+ * fixed UI pipeline, textured with the given image (tr.whiteImage if NULL).
+ */
+void VK_Draw2D(struct shaderCommands_s *input, struct image_s *image, unsigned long stateBits);
+
+/**
+ * @brief Captures the GL-convention projection matrix (see
+ * tr_backend.c's SetViewportAndScissor()) and bakes in the GL -> Vulkan
+ * clip-space correction (Y-flip + depth range remap).
+ */
+void VK_SetProjectionMatrix(const float *m);
+void VK_GetProjectionMatrix(float *m);
+void VK_SetRawProjectionMatrix(const float *m);
+
+/**
+ * @brief Sets the dynamic viewport/scissor for 3D scene
+ * draws. Must be called once per view (a single frame may contain
+ * multiple 3D views with different viewport rects, e.g. the limbo menu's
+ * small player-model preview alongside the main world view).
+ */
+void VK_SetSceneViewport(int x, int y, int width, int height);
+
+/**
+ * @brief Reissues the last scene viewport with a different
+ * depth range (used by sky rendering to pin geometry to the far depth
+ * plane, matching renderer1's glDepthRange(1,1) trick).
+ */
+void VK_SetDepthRange(float minDepth, float maxDepth);
+
+/**
+ * @brief Clears the depth buffer within the last scene
+ * viewport rect (renderer1's per-view glClear(GL_DEPTH_BUFFER_BIT)).
+ */
+void VK_ClearSceneDepth(void);
+void VK_SoftDepthNewView(void);
+
+/**
+ * @brief Color clear with the last glClearColor() value, over
+ * the last scene viewport (or the whole framebuffer).
+ */
+void VK_ClearSceneColor(qboolean fullFramebuffer);
+
+/**
+ * @brief Clear color used by VK_ClearSceneColor() (renderer1's
+ * glClearColor).
+ */
+void VK_SetClearColor(float r, float g, float b, float a);
+
+/**
+ * @brief Gamma and overbright multiplier applied by the final
+ * offscreen -> swapchain pass in VK_EndFrame().
+ */
+void VK_SetGammaParams(float gamma, float overbrightScale);
+
+/**
+ * @brief Stencil bits of the depth attachment (0 or 8).
+ */
+int VK_StencilBits(void);
+
+/**
+ * @brief Stencil shadow volumes (renderer1's
+ * RB_ShadowTessEnd()/RB_ShadowFinish()). xyz is the engine's padded
+ * vec4 position array; cullType uses the CT_* convention.
+ */
+void VK_DrawShadowVolume(const float (*xyz)[4], int numVertexes, const unsigned int *indexes, int numIndexes, int cullType, qboolean increment);
+void VK_DrawShadowFinish(void);
+
+/**
+ * @brief Captures the GL-convention modelview matrix (world
+ * or per-entity, see tr_backend.c's RB_RenderDrawSurfList()) and
+ * recomputes the cached MVP used by VK_Draw3D()/VK_Draw3DLightmapped().
+ */
+void VK_SetModelViewMatrix(const float *m);
+void VK_GetModelViewMatrix(float *m);
+
+/**
+ * @brief Records fog parameters applied in the 3D fragment
+ * shaders based on eye-space depth: linear (start/end) or exponential
+ * (GL_EXP: f = exp(-density * depth)). Called from R_Fog() (tr_main.c)
+ * where renderer1 calls glFog*().
+ */
+void VK_SetFog(const float *color, float start, float end, qboolean exponential, float density);
+
+/**
+ * @brief Disables fog for subsequent 3D draws. Called from
+ * R_FogOff() (tr_main.c) in place of the no-op'd glDisable(GL_FOG).
+ */
+void VK_SetFogOff(void);
+void VK_SetFogOn(void);
+
+/**
+ * @brief Records an eye-space portal/mirror clip-plane
+ * equation, applied as a per-fragment discard in the 3D fragment shaders.
+ * Called from RB_BeginDrawingView() (tr_backend.c) in place of the
+ * no-op'd glClipPlane()/glEnable(GL_CLIP_PLANE0) calls.
+ */
+void VK_SetPortalClip(const float *planeEq);
+
+/**
+ * @brief Disables the portal/mirror clip plane for
+ * subsequent 3D draws. Called in place of the no-op'd
+ * glDisable(GL_CLIP_PLANE0).
+ */
+void VK_ClearPortalClip(void);
+
+/**
+ * @brief Submits one already-tessellated 3D shader stage
+ * batch (single texture) using a pipeline variant matching stateBits/
+ * cullType, transformed by the current projection * modelview matrix.
+ */
+void VK_Draw3D(struct shaderCommands_s *input, struct image_s *image, unsigned long stateBits, int cullType);
+
+/**
+ * @brief VK_Draw3D() restricted to a subset of indexes (all
+ * vertices still uploaded), used by the dynamic light pass.
+ */
+void VK_Draw3DIndexes(struct shaderCommands_s *input, const unsigned int *indexes, int numIndexes, struct image_s *image, unsigned long stateBits, int cullType);
+
+/**
+ * @brief Submits one already-tessellated 3D shader stage
+ * batch modulating two textures (base * lightmap).
+ */
+void VK_Draw3DLightmapped(struct shaderCommands_s *input, struct image_s *base, struct image_s *lightmap, unsigned long stateBits, int cullType);
+
+/**
+ * @brief Draws a two-stage batch in one draw (RB_StageIteratorGeneric's
+ * RB_TwoStageFoldable() case): stage 0 (opaque, stateBits0) with image0,
+ * texcoords[0] and colors0; stage 1 with image1, texcoords[1] and colors1,
+ * blended over it in the shader with stage 1's blendFunc (blendBits1).
+ */
+void VK_Draw3DTwoStage(struct shaderCommands_s *input, struct image_s *image0, struct image_s *image1, const byte (*colors0)[4],
+                       const byte (*colors1)[4], unsigned long stateBits0, unsigned long blendBits1, int cullType);
+
+#endif // VK_H

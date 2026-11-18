@@ -41,11 +41,13 @@
 #include "../renderercommon/tr_public.h"
 #include "../renderercommon/tr_common.h"
 
-#ifdef BUNDLED_GLEW
-#include "GL/glew.h"
-#else
-#include <GL/glew.h>
-#endif
+// renderer_vk does not use OpenGL at all: this header defines just enough of
+// the legacy GL types/constants/no-op calls so that the frontend code shared
+// with renderer1 (scene setup, debug draw helpers, etc.) still compiles.
+// The actual drawing happens through src/renderer_vk/vulkan/vk.h instead.
+#include "vk_gl_compat.h"
+
+#include "tr_cvars.h"
 
 #define GL_INDEX_TYPE       GL_UNSIGNED_INT
 typedef unsigned int glIndex_t;
@@ -105,7 +107,6 @@ typedef struct image_s
 	char imgName[MAX_QPATH];        ///< game path, including extension
 	int width, height;              ///< source image
 	int uploadWidth, uploadHeight;  ///< after power of two and picmip but not including clamp to MAX_TEXTURE_SIZE
-	unsigned int texnum;            ///< gl texture binding
 
 	int frameUsed;                  ///< for texture usage in frame statistics
 
@@ -117,6 +118,17 @@ typedef struct image_s
 	int wrapClampMode;              ///< GL_CLAMP or GL_REPEAT
 
 	int hash;                       ///< for fast building of the backupHash
+
+	// Vulkan-backed texture handles (opaque here to avoid pulling vulkan.h into
+	// this widely shared header; vulkan/vk.c casts these to the real Vk* types).
+	// 64-bit integers, not pointers: on 32-bit builds the non-dispatchable
+	// Vulkan handles are uint64_t and wouldn't fit in a void *.
+	uint64_t vkImage;
+	uint64_t vkImageMemory;
+	uint64_t vkImageView;
+	uint64_t vkSampler;
+	uint64_t vkDescriptorSet;
+	int vkBindlessSlot;             ///< slot + 1 in the Vulkan bindless texture array, 0 = none
 
 	struct image_s *next;
 } image_t;
@@ -485,6 +497,9 @@ typedef struct shader_s
 
 	qboolean entityMergable;            ///< merge across entites optimizable (smoke, blood)
 
+	qboolean vkStatic;                  ///< world surfaces can be drawn from the static world buffer (see ComputeVkStatic)
+	qboolean vkSkinnable;               ///< MDM surfaces can be skinned in the vertex shader (see ComputeVkSkinnable)
+
 	qboolean isSky;
 	skyParms_t sky;
 	fogParms_t fogParms;
@@ -720,6 +735,8 @@ typedef struct
 
 	glfog_t glFog;                  ///< fog parameters
 
+	int vkCullView;                 ///< Vulkan: GPU world culling view this frame (VK_CullBeginView), -1 = CPU world walk
+
 } viewParms_t;
 
 /*
@@ -752,6 +769,7 @@ typedef enum
 	SF_DISPLAY_LIST,
 	SF_POLYBUFFER,
 	SF_DECAL,               ///< decal surfaces
+	SF_VK_WORLDGROUP,       ///< Vulkan: GPU-culled world surfaces of one shader (vkWorldGroup_t)
 
 	SF_NUM_SURFACE_TYPES,
 	SF_MAX = 0xffffffff     ///< ensures that sizeof( surfaceType_t ) == sizeof( int )
@@ -949,6 +967,8 @@ typedef struct srfTriangles_s
 
 	int numVerts;
 	drawVert_t *verts;
+
+	int vkFirstVertex;      ///< first vertex in the Vulkan static world buffer, -1 if not uploaded
 } srfTriangles_t;
 
 /**
@@ -1025,6 +1045,12 @@ typedef struct
 	// origins
 	int numInstances;
 	foliageInstance_t *instances;
+
+	/// first vertex of the model in the Vulkan static world buffer (shared by
+	/// surfaces with the same model), -1 if not uploaded
+	int vkFirstVertex;
+	/// first instance in the Vulkan foliage instance buffer, -1 if not uploaded
+	int vkFirstInstance;
 } srfFoliage_t;
 
 extern void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES]) (void *);
@@ -1049,10 +1075,25 @@ BRUSH MODELS
 typedef struct msurface_s
 {
 	int viewCount;                  ///< if == tr.viewCount, already added
-	shader_t *shader;
 	int fogIndex;
+	shader_t *shader;
 
 	surfaceType_t *data;            ///< any of srf*_t
+
+	/// Copy of data's surface type and culling information (srfGeneric_t),
+	/// read by R_CullSurface() next to viewCount, so that culling doesn't
+	/// touch the scattered surface data (a cache miss per surface). Set by
+	/// R_LoadSurfaceCullData() after the surfaces are loaded.
+	surfaceType_t cullSurfaceType;
+	float cullRadius;
+	vec3_t cullOrigin;
+	vec3_t cullNormal;
+	float cullDist;
+	byte cullPlaneType;
+
+	int vkCullIndex;                ///< Vulkan: surface number in GPU world culling, -1 = CPU only
+
+	struct decal_s *decals;         ///< decal slots whose parent this is (decal_t::nextOnParent)
 } msurface_t;
 
 /**
@@ -1070,6 +1111,8 @@ typedef struct decal_s
 	polyVert_t verts[MAX_DECAL_VERTS];
 	int projectorNum;
 	int frameAdded;                     ///< need to keep decal for at least one frame so we know not to reproject it in later views
+	struct decal_s *nextOnParent;       ///< the parent's other decal slots (msurface_t::decals)
+	struct decal_s *prevOnParent;
 } decal_t;
 
 #define CONTENTS_NODE       -1
@@ -1098,7 +1141,33 @@ typedef struct mnode_s
 
 	msurface_t **firstmarksurface;
 	int nummarksurfaces;
+
+	// Vulkan GPU world culling (R_VkBuildWorldCull): the leaf's marksurfaces
+	// split into GPU-culled ones and the rest, and the groups of the former
+	msurface_t **vkGpuMarks;
+	int numVkGpuMarks;
+	msurface_t **vkCpuMarks;
+	int numVkCpuMarks;
+	int *vkGroups;
+	int numVkGroups;
 } mnode_t;
+
+/**
+ * @struct vkWorldGroup_t
+ * @brief Vulkan: the GPU-culled world surfaces of one shader, added to a
+ * view as one draw surface (SF_VK_WORLDGROUP) when one of its leaves is
+ * visible; drawn with the group's indirect command (VK_CullCommandOffset)
+ */
+typedef struct
+{
+	surfaceType_t surfaceType;
+	int index;
+	shader_t *shader;
+	int fogIndex;                   ///< fog volume of its surfaces (groups are per shader and fog)
+	int firstIndex;                 ///< region in a view's culling output (indexes)
+	int numIndexes;                 ///< all its surfaces' indexes (size of the region)
+	int viewCount;                  ///< added to tr.viewCount's view
+} vkWorldGroup_t;
 
 /**
  * @struct bmodel_s
@@ -1112,6 +1181,8 @@ typedef struct bmodel_s
 	int numSurfaces;
 
 	decal_t *decals;
+	int decalFreeHint;                  ///< no slot below this has a NULL shader (none can be free)
+	int decalHighWater;                 ///< slots from here on have a NULL shader
 
 	// for fog volumes
 	int firstBrush;
@@ -1232,6 +1303,10 @@ typedef struct model_s
 
 	qhandle_t shadowShader;
 	float shadowParms[6];           ///< x, y, width, height, depth, z offset
+
+	/// MDM: per surface, its first vertex in the Vulkan skin buffer
+	/// (R_LoadMDM), -1 = skinned on the CPU (more than 4 weights, buffer full)
+	int *vkSkinFirstVertex;
 } model_t;
 
 #define MAX_MOD_KNOWN   2048
@@ -1419,6 +1494,7 @@ typedef struct
 
 	int numLightmaps;
 	image_t *lightmaps[MAX_LIGHTMAPS];
+	qboolean lightmapFailed[MAX_LIGHTMAPS];     ///< external lightmap lookup failed for this index
 
 	trRefEntity_t *currentEntity;
 	trRefEntity_t worldEntity;                  ///< point currentEntity at this when rendering world
@@ -1475,8 +1551,7 @@ typedef struct
 
 	int allowCompress;                          ///< temp var used while parsing shader only
 
-	qboolean gammaProgramUsed;
-	qboolean useFBO;
+	qboolean gammaInShader;                     ///< r_gamma/overbright applied in the gamma pass (off with r_ignorehwgamma)
 
 } trGlobals_t;
 
@@ -1486,8 +1561,6 @@ extern glconfig_t     glConfig;     ///< outside of TR since it shouldn't be cle
 extern glstate_t      glState;      ///< outside of TR since it shouldn't be cleared during ref re-init
 
 //====================================================================
-
-void R_SwapBuffers(int);
 
 void R_RenderView(viewParms_t *parms);
 
@@ -1518,14 +1591,8 @@ void R_RotateForEntity(const trRefEntity_t *ent, const viewParms_t *viewParms, o
 GL wrapper/helper functions
 */
 void GL_Bind(image_t *image);
-void GL_SetDefaultState(void);
-void GL_SelectTexture(int unit);
 void GL_TextureMode(const char *string);
-void GL_CheckErrors(void);
 void GL_State(unsigned long stateBits);
-void GL_FullscreenQuad(void);
-void GL_TexEnv(int env);
-void GL_Cull(int cullType);
 
 #define GLS_SRCBLEND_ZERO                       0x00000001
 #define GLS_SRCBLEND_ONE                        0x00000002
@@ -1573,6 +1640,8 @@ qhandle_t RE_RegisterModel(const char *name);
 qhandle_t RE_RegisterSkin(const char *name);
 void RE_Shutdown(qboolean destroyWindow);
 
+dshader_t *R_FindBspShaderByName(const char *name);
+
 qboolean R_GetEntityToken(char *buffer, size_t size);
 
 float R_ProcessLightmap(byte *pic, int in_padding, int width, int height, byte *pic_out);
@@ -1588,12 +1657,11 @@ image_t *R_FindImageFile(const char *name, qboolean mipmap, qboolean allowPicmip
 image_t *R_CreateImage(const char *name, const byte *pic, int width, int height, qboolean mipmap, qboolean allowPicmip, int wrapClampMode);
 
 void R_SetColorMappings(void);
-void R_GammaCorrect(byte *buffer, int bufSize);
+void RB_FinishFrameCaptures(void);
 
 void R_ImageList_f(void);
 void R_SkinList_f(void);
 
-byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, int *padlen);
 
 const void *RB_TakeScreenshotCmd(const void *data);
 void R_ScreenShot_f(void);
@@ -1646,6 +1714,24 @@ typedef struct
 	vec2_t texcoords[NUM_TEXTURE_BUNDLES][SHADER_MAX_VERTEXES];
 } stageVars_t;
 
+#define VK_MAX_FOLIAGE_DRAWS 64
+
+/**
+ * @struct vkFoliageDraw_t
+ * @brief One instanced draw of a foliage batch (tess.vkFoliage): a model's
+ * indexes in the scene index arena (pointing into the static world buffer)
+ * and a range of the foliage instance buffer (culled per instance in the
+ * vertex shader)
+ */
+typedef struct
+{
+	int firstVertex; ///< the model (srfFoliage_t::vkFirstVertex)
+	int firstIndex;
+	int numIndexes;
+	int firstInstance;
+	int numInstances;
+} vkFoliageDraw_t;
+
 /**
  * @struct shaderCommands_s
  * @typedef shaderCommands_t
@@ -1676,14 +1762,166 @@ typedef struct shaderCommands_s
 	int numPasses;
 	void (*currentStageIteratorFunc)(void);
 	shaderStage_t **xstages;
+
+	/// static world batch: indexes point into the Vulkan static world buffer
+	/// and no vertex data was tessellated (numVertexes == 0), see RB_SurfaceTriangles
+	qboolean vkStatic;
+	/// static world batch: its numIndexes indexes are not in indexes[] but
+	/// written once into the frame's scene index arena, starting at this
+	/// index (VK_AllocSceneIndexes); every stage's draw uses that range
+	int vkStaticFirstIndex;
+	/// static batch of one GPU-culled world group (RB_SurfaceVkWorldGroup):
+	/// drawn with the indirect command at this byte offset in the cull arena
+	qboolean vkIndirect;
+	unsigned int vkIndirectOffset;
+	/// MDM surface skinned in the vertex shader (one surface per batch, see
+	/// RB_MDM_SurfaceAnimGPU): no tess vertices; numIndexes indexes into the
+	/// skin buffer are in the scene index arena from vkSkinFirstIndex, the
+	/// surface's bones in the bone arena at vkSkinBoneOffset (bytes)
+	qboolean vkSkin;
+	int vkSkinFirstIndex;
+	unsigned int vkSkinBoneOffset;
+	/// MD3/MDC surface interpolated in the vertex shader (one surface per
+	/// batch, see RB_SurfaceMeshGPU/RB_SurfaceCMeshGPU): no tess vertices; the
+	/// surface's frames, texture coords and triangles are in the Vulkan mesh
+	/// buffer at these byte offsets (new = the entity's frame, old = its
+	/// oldframe; MDC: their base frames, plus their compressed frames when
+	/// vkMeshFlags has VK_MESH_NEW_COMP / VK_MESH_OLD_COMP), lerp = new xyz
+	/// scale, old xyz scale, new normal scale, old normal scale (< 0: no
+	/// interpolation)
+	qboolean vkMesh;
+	int vkMeshFlags;
+	unsigned int vkMeshNewOfs;
+	unsigned int vkMeshOldOfs;
+	unsigned int vkMeshNewCompOfs;
+	unsigned int vkMeshOldCompOfs;
+	unsigned int vkMeshStOfs;
+	unsigned int vkMeshIndexOfs;
+	float vkMeshLerp[4];
+	/// GPU-skinned/animated batch with a tcGen environment stage: the
+	/// RB_CalcEnvironmentTexCoords() parameters for the vertex shader, in
+	/// the uniform arena at this offset (RB_VkSetupEnvParams)
+	unsigned int vkEnvOffset;
+	float vkEnvParams[12];          ///< CPU copy of the block at vkEnvOffset (merged model batches)
+	unsigned int vkSurfaceSerial;   ///< RB_BeginSurface count: tells a batch's stages from the next batch's
+	/// the stage being drawn is rgbGen lightingDiffuse computed in the vertex
+	/// shader (VK_Draw3DDiffuse): ComputeColors() left the rgb unset, see
+	/// RB_StageGpuDiffuse()
+	qboolean vkDiffuse;
+	/// stage being drawn (colors for static batches), NULL = constant white
+	shaderStage_t *vkStage;
+	/// instanced foliage batch (RB_SurfaceFoliage): no tess vertices or
+	/// indexes; every stage draws these instanced draws (numIndexes only
+	/// counts the triangles) with the batch's per-instance cull parameters
+	/// in the uniform arena at vkFoliageCullOffset
+	qboolean vkFoliage;
+	unsigned int vkFoliageCullOffset;
+	/// sprites and polys, drawn as soft particles (r_softParticles), unless the
+	/// batch also has another kind of surface (vkNotSoft)
+	qboolean vkSoft;
+	qboolean vkNotSoft;
+	int vkNumFoliageDraws;
+	vkFoliageDraw_t vkFoliageDraws[VK_MAX_FOLIAGE_DRAWS];
 } shaderCommands_t;
 
 extern shaderCommands_t tess;
 
 void RB_BeginSurface(shader_t *shader, int fogNum);
 void RB_EndSurface(void);
+void RB_ClearSurface(void);
 void RB_CheckOverflow(int verts, int indexes);
-#define RB_CHECKOVERFLOW(v, i) if (tess.numVertexes + (v) >= SHADER_MAX_VERTEXES || tess.numIndexes + (i) >= SHADER_MAX_INDEXES) { RB_CheckOverflow(v, i); }
+void RB_EndStaticBatch(void);
+qboolean RB_ShaderTakesDlights(int dlightBits);
+qboolean RB_VkModelFogOk(void);
+
+// Vulkan static world geometry (vulkan/vk.c): per-map vertex buffer that
+// static batches (tess.vkStatic) index into, filled by R_LoadStaticWorldVertices()
+qboolean VK_CreateStaticWorldBuffer(int numVertexes);
+void VK_WriteStaticWorldVertices(int first, const drawVert_t *verts, int count);
+void VK_WriteStaticFoliageVertices(int first, const srfFoliage_t *srf);
+qboolean VK_CreateFoliageInstanceBuffer(int numInstances);
+void VK_WriteFoliageInstances(int first, const srfFoliage_t *srf);
+float *VK_AllocFoliageCull(unsigned int *offset);
+void VK_Draw3DFoliageFog(shaderCommands_t *input, const image_t *fogImage, unsigned long stateBits, int cullType,
+                         const vec4_t sVec, const vec4_t tVec, float eyeT, const byte *color);
+void VK_Draw3DModelFog(shaderCommands_t *input, const image_t *fogImage, unsigned long stateBits, int cullType,
+                       const vec4_t sVec, const vec4_t tVec, float eyeT, const byte *color);
+glIndex_t *VK_AllocSceneIndexes(int count, int *firstIndex);
+
+// Vulkan GPU skinning (vulkan/vk.c): MDM vertices in a skin buffer filled at
+// model load (R_LoadMDM), reset with the models (R_ModelInit); bones are
+// uploaded per batch. Bone indices are local to the surface's bone references.
+// Up to VK_SKIN_MAX_WEIGHTS weights: the first four, then a second set (zero
+// weights when unused; the Axis player body has vertices with 5).
+#define VK_SKIN_MAX_WEIGHTS 8
+typedef struct
+{
+	float uv[2];
+	float normal[3];
+	byte bones[4];
+	float weights[4];
+	float offsets[4][3];
+	byte bones2[4];
+	float weights2[4];
+	float offsets2[4][3];
+} vkSkinVertex_t;
+
+void VK_ResetSkinBuffer(void);
+int VK_WriteSkinVertices(const vkSkinVertex_t *verts, int count);
+float *VK_AllocSkinBones(int numBones, unsigned int *offset);
+
+// Vulkan GPU MD3 animation (vulkan/vk.c): every MD3 surface's frames,
+// texture coords and triangles in a mesh buffer, written at model load and
+// reset with the skin buffer; RB_SurfaceMeshGPU looks a surface up here
+int VK_WriteMeshData(const void *data, int bytes);
+float *VK_AllocEnvParams(unsigned int *offset);
+
+/// GPU world culling surface (world_cull.comp's Surface, std430)
+typedef struct
+{
+	float sphere[4];                ///< origin, radius
+	float plane[4];                 ///< normal, dist
+	unsigned int firstIndex;        ///< in the culling index data
+	unsigned int numIndexes;
+	unsigned int group;
+	unsigned int leafFirst;         ///< in the surface leaf list
+	unsigned int leafCount;
+	unsigned int cullMode;          ///< 0: no face plane cull, 1: front sided, 2: back sided
+	unsigned int pad[2];
+} vkCullSurface_t;
+
+/// one world view's GPU culling (VK_CullBeginView)
+typedef struct
+{
+	int view;
+	unsigned int stamp;             ///< skip[surface] = stamp: the CPU draws it in this view
+	unsigned int *skip;             ///< in mapped GPU memory: write only
+	unsigned int *leafBits;         ///< visible leaves (world node numbers), in CPU memory: copied by VK_CullDispatch
+} vkCullView_t;
+
+#define VK_CULL_NOCULL      1
+#define VK_CULL_FACEPLANE   2
+
+qboolean VK_CreateWorldCull(const vkCullSurface_t *surfs, int numSurfs, const unsigned int *surfLeaves, int numSurfLeaves,
+                            const unsigned int *indexes, int numIndexes, int numLeaves, int numGroups);
+qboolean VK_CullBeginView(vkCullView_t *cv, const int *groupFirst);
+qboolean VK_WorldBatchOn(void);
+void VK_Draw3DStaticFog(shaderCommands_t *input, const image_t *fogImage, unsigned long stateBits, int cullType,
+                        const vec4_t sVec, const vec4_t tVec, float eyeT, const byte *color);
+unsigned int VK_CullLeafWords(void);
+void VK_CullDispatch(const vkCullView_t *cv, const cplane_t *frustum, const vec3_t viewOrigin, int flags);
+unsigned int VK_CullCommandOffset(int view, int group);
+void R_VkBuildWorldCull(void);
+qboolean R_VkSurfaceInVisibleLeaf(const msurface_t *surf);
+void R_VkMeshReset(void);
+void R_VkMeshRegister(md3Surface_t *surf);
+void R_VkMeshRegisterMDC(mdcSurface_t *surf);
+void RB_VkSetupEnvParams(void);
+
+#define VK_MESH_MDC      1 // tess.vkMeshFlags: MDC surface (else MD3)
+#define VK_MESH_NEW_COMP 2 // MDC: the frame has a compressed frame
+#define VK_MESH_OLD_COMP 4 // MDC: the oldframe has a compressed frame
+#define RB_CHECKOVERFLOW(v, i) if (tess.vkStatic || tess.vkSkin || tess.vkMesh || tess.vkFoliage) { RB_EndStaticBatch(); } if (tess.numVertexes + (v) >= SHADER_MAX_VERTEXES || tess.numIndexes + (i) >= SHADER_MAX_INDEXES) { RB_CheckOverflow(v, i); }
 
 void RB_StageIteratorGeneric(void);
 void RB_StageIteratorSky(void);
@@ -1692,11 +1930,8 @@ void RB_StageIteratorLightmappedMultitexture(void);
 
 void RB_AddQuadStamp(vec3_t origin, vec3_t left, vec3_t up, byte *color);
 void RB_AddQuadStampExt(vec3_t origin, vec3_t left, vec3_t up, byte *color, float s1, float t1, float s2, float t2);
-void RB_AddQuadStampFadingCornersExt(vec3_t origin, vec3_t left, vec3_t up, byte *color, float s1, float t1, float s2, float t2); // Unused.
 
 void RB_ShowImages(void);
-
-void RB_DrawBounds(vec3_t mins, vec3_t maxs);
 
 /*
 ============================================================
@@ -1847,6 +2082,7 @@ void RB_DeformTessGeometry(void);
 void RB_CalcEnvironmentTexCoords(float *texCoords);
 void RB_CalcFireRiseEnvTexCoords(float *st);
 void RB_CalcFogTexCoords(float *texCoords);
+qboolean RB_CalcFogTexCoordParams(vec4_t sVec, vec4_t tVec, float *eyeT);
 void RB_CalcScrollTexCoords(const float scrollSpeed[2], float *texCoords);
 void RB_CalcRotateTexCoords(float degsPerSecond, float *texCoords);
 void RB_CalcScaleTexCoords(const float scale[2], float *texCoords);
@@ -2153,7 +2389,6 @@ void R_CacheImageFreeAll();
 void R_CacheImageFree(void *ptr);
 qboolean R_TouchImage(image_t *inImage);
 image_t *R_FindCachedImage(const char *name, int hash);
-void R_FindFreeTexnum(image_t *image);
 void R_LoadCacheImages(void);
 void R_PurgeBackupImages(int purgeCount);
 void R_BackupImages(void);
@@ -2169,92 +2404,7 @@ void R_BackupShaders(void);
 void R_PurgeShaders(int count);
 void R_PurgeLightmapShaders(void);
 void R_LoadCacheShaders(void);
-
-// tr_gamma.c
-void R_ScreenGamma(void);
-void R_InitGamma(void);
-void R_ShutdownGamma(void);
-
-// tr_shader_program.c
-typedef struct shaderProgram_s
-{
-	GLhandleARB program;
-	GLhandleARB vertexShader;
-	GLhandleARB fragmentShader;
-} shaderProgram_t;
-
-void R_UseShaderProgram(shaderProgram_t *program);
-GLint R_GetShaderProgramUniform(shaderProgram_t *program, const char *name);
-shaderProgram_t *R_CreateShaderProgram(const char *vert, const char *frag);
-void R_DestroyShaderProgram(shaderProgram_t *program);
-qboolean R_ShaderProgramsAvailable(void);
-void R_InitShaderPrograms(void);
-void R_ShutdownShaderPrograms(void);
-
-// tr_fbo.c
-typedef struct
-{
-	char name[MAX_QPATH];
-	GLuint fbo;
-
-	GLuint color;
-	GLuint colorBuffer;
-
-	GLuint depth;
-	GLuint depthBuffer;
-
-	qboolean stencil;
-	int samples;
-
-	int width;
-	int height;
-
-	uint8_t flags;
-} frameBuffer_t;
-
-typedef enum
-{
-	READ,
-	WRITE,
-	BOTH
-} fboBinding;
-
-typedef enum
-{
-	FBO_DEPTH = BIT(0),
-	FBO_ALPHA = BIT(1)
-}fboFlags;
-
-extern frameBuffer_t *mainFbo;
-extern frameBuffer_t *msMainFbo;
-#ifdef HUD_FBO
-extern frameBuffer_t *hudFbo;
-#endif
-
-void R_FBOSetViewport(frameBuffer_t *from, frameBuffer_t *to);
-void R_BindFBO(frameBuffer_t *fb);
-frameBuffer_t *R_CurrentFBO();
-byte *R_FBOReadPixels(frameBuffer_t *fb, size_t *offset, int *padlen);
-void R_FboCopyToTex(frameBuffer_t *from, image_t *to);
-void R_FboBlit(frameBuffer_t *from, frameBuffer_t *to);
-void R_FboRenderTo(frameBuffer_t *from, frameBuffer_t *to);
-void R_ShutdownFBO(void);
-void R_InitFBO(void);
-
-#define R_BindMainFBO() { if (msMainFbo) R_BindFBO(msMainFbo); else R_BindFBO(mainFbo); }
-
-#ifdef HUD_FBO
-#define R_BindHudFBO() { R_BindFBO(hudFbo); }
-#define R_ClearHudFBO() { R_BindHudFBO(); glClearColor(1.f, 1.f, 1.f, 0.f); glClear(GL_COLOR_BUFFER_BIT); }
-#define R_DrawHudOnTop() { \
-			GL_State(GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA); \
-			R_FboRenderTo(hudFbo, NULL); \
-}
-#else
-#define R_BindHudFBO()
-#define R_ClearHudFBO()
-#define R_DrawHudOnTop()
-#endif
+void R_PurgeDynamicShaders(void);
 
 //------------------------------------------------------------------------------
 
@@ -2327,49 +2477,30 @@ void R_Hunk_End(void);
 void R_FreeImageBuffer(void);
 
 qboolean R_inPVS(const vec3_t p1, const vec3_t p2);
+void R_ClearPVSCache(void);
 
-//------------------------------------------------------------------------------
+void GfxInfo_f(void);
 
-// cvars
+void R_Register(void);
 
-extern cvar_t *r_ignoreFastPath;        ///< allows us to ignore our Tess fast paths
+// Immediate-mode emulation (tr_backend.c): renderer1's glBegin/glVertex/
+// glColor/glTexCoord/glEnd debug drawing, drawn with the current
+// GL_State() bits and GL_Bind() image.
+void VKimm_Begin(int mode);
+void VKimm_End(void);
+void VKimm_Vertex3f(float x, float y, float z);
+void VKimm_Color4f(float r, float g, float b, float a);
+void VKimm_TexCoord2f(float s, float t);
+void VKimm_PointSize(float size);
 
-extern cvar_t *r_textureBits;           ///< number of desired texture bits
-                                        ///< 0 = use framebuffer depth
-                                        ///< 16 = use 16-bit textures
-                                        ///< 32 = use 32-bit textures
-                                        ///< all else = error
+// argument-form variants (renderer1's glVertex2f/glVertex3fv/glColor3f/...)
+#define VKimm_Vertex2f(x, y)       VKimm_Vertex3f((x), (y), 0.0f)
+#define VKimm_Vertex3fv(v)         VKimm_Vertex3f((v)[0], (v)[1], (v)[2])
+#define VKimm_Color3f(r, g, b)     VKimm_Color4f((r), (g), (b), 1.0f)
+#define VKimm_Color3fv(v)          VKimm_Color4f((v)[0], (v)[1], (v)[2], 1.0f)
+#define VKimm_Color4fv(v)          VKimm_Color4f((v)[0], (v)[1], (v)[2], (v)[3])
+#define VKimm_TexCoord2fv(v)       VKimm_TexCoord2f((v)[0], (v)[1])
 
-extern cvar_t *r_extMaxAnisotropy;      ///< FIXME: not used in GLES ! move it ?
-                                        ///< FIXME: "extern int      maxAnisotropy" founded
-
-extern cvar_t *r_lightMap;              ///< render lightmaps only
-
-extern cvar_t *r_trisColor;             ///< enables modifying of the wireframe colour (in 0xRRGGBB[AA] format, alpha defaults to FF)
-extern cvar_t *r_showNormals;           ///< draws wireframe normals
-extern cvar_t *r_normalLength;          ///< length of the normals
-//extern cvar_t *r_showmodelbounds;		///< see RB_MDM_SurfaceAnim()
-
-extern cvar_t *r_lodCurveError;
-
-extern cvar_t *r_greyScale;
-
-extern cvar_t *r_directedScale;
-
-extern cvar_t *r_cache;
-extern cvar_t *r_cacheShaders;
-extern cvar_t *r_cacheModels;
-
-extern cvar_t *r_fbo;
-
-extern cvar_t *r_cacheGathering;
-
-extern cvar_t *r_bonesDebug;
-
-extern cvar_t *r_wolfFog;
-
-extern cvar_t *r_gfxInfo;
-
-extern cvar_t *r_scale;
+#include "vulkan/vk.h"
 
 #endif //TR_LOCAL_H

@@ -7,6 +7,8 @@ import re
 import requests
 import sys
 
+NON_PERTINENT_ARCHES = ["android", "win64"]
+
 EXPLICITLY_IGNORED_WARNINGS = {
     "android": [],
     "lnx-aarch64": [
@@ -121,7 +123,7 @@ def check_logs(args):
         found_logs_count += 1
         arch = (txt_file.split("job-logs-")[1]).split(".txt")[0]
 
-        is_non_pertinent = "android" in txt_file or "win64" in txt_file
+        is_non_pertinent = arch in NON_PERTINENT_ARCHES
         pertinent_lines, skipped_lines = clean_and_process_file(arch, txt_file)
 
         if not args.show_skipped and len(pertinent_lines) <= 0:
@@ -160,8 +162,9 @@ def check_logs(args):
         f"{skipped} warnings were skipped/excluded (assumed to not be directly from ETL, but deps)..."
     )
     if failed > 0:
+        ignored_arches = ", ".join(arch.capitalize() for arch in NON_PERTINENT_ARCHES)
         print(
-            f"{failed} pertinent warnings were emitted (ignoring Android), failing..."
+            f"{failed} pertinent warnings were emitted (ignoring {ignored_arches}), failing..."
         )
         exit(1)
     else:
@@ -191,8 +194,10 @@ def collect_logs():
         "Accept": "application/vnd.github.v3+json",
     }
 
-    # List jobs for this workflow run
-    jobs_url = f"{api}/repos/{repo}/actions/runs/{run_id}/jobs"
+    # List jobs for this workflow run. The API returns 30 jobs per page by
+    # default, which a release run with all its matrix jobs gets close to, so
+    # ask for the maximum of 100 to get them all on the one page read here.
+    jobs_url = f"{api}/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"
     resp = requests.get(jobs_url, headers=headers)
     if resp.status_code != 200:
         print(f"Failed to fetch jobs: {resp.status_code} {resp.text}")
@@ -200,8 +205,13 @@ def collect_logs():
     jobs = resp.json().get("jobs", [])
 
     for need in needs_list:
-        # Find job with matching name
-        job = next((j for j in jobs if j["name"] == need), None)
+        # Find job with matching name. Runs started through a calling workflow
+        # like ETLBuild prefix every job name with its calling job, e.g.
+        # "release / lnx64".
+        job = next(
+            (j for j in jobs if j["name"] == need or j["name"].endswith(f" / {need}")),
+            None,
+        )
         if job:
             job_id = job["id"]
             log_url = f"{api}/repos/{repo}/actions/jobs/{job_id}/logs"

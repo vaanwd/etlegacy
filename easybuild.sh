@@ -348,6 +348,12 @@ parse_commandline() {
             einfo "Will disable database"
             FEATURE_DBMS=0
             BUNDLED_SQLITE3=0
+        elif [ "$var" = "-vk" ] || [ "$var" = "-vulkan" ]; then
+            einfo "Will enable Vulkan renderer"
+            FEATURE_RENDERER_VULKAN=1
+        elif [ "$var" = "-nor1" ] || [ "$var" = "-no-r1" ]; then
+            einfo "Will disable OpenGL1 renderer"
+            FEATURE_RENDERER1=0
         elif [ "$var" = "-nor2" ] || [ "$var" = "-no-r2" ]; then
             einfo "Will disable renderer2"
             FEATURE_RENDERER2=0
@@ -408,27 +414,6 @@ parse_commandline() {
             FEATURE_PNG=1
             FEATURE_OMNIBOT=1
             INSTALL_OMNIBOT=1
-        elif [ "$var" = "-emscripten" ] || [ "$var" = "-emsc" ]; then
-            einfo "Will enable Emscripten build"
-            CROSS_COMPILE32=0
-            x86_build=false
-            FEATURE_RENDERER_GLES=0
-            RENDERER_DYNAMIC=0
-            FEATURE_RENDERER2=0
-            INSTALL_EXTRA=0
-            BUNDLED_OPENSSL=0
-            BUILD_MOD_PK3=0
-            BUNDLED_THEORA=0
-            FEATURE_THEORA=0
-            FEATURE_OPENAL=0
-            BUNDLED_WOLFSSL=0
-            FEATURE_SSL=1
-            FEATURE_CURL=0
-            BUNDLED_GLEW=0
-            BUILD_SERVER=0
-            BUNDLED_OGG_VORBIS=0
-            FEATURE_OGG_VORBIS=0
-            TOOLCHAIN_FILE=${EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake
         elif [ "$var" = "-ninja" ]; then
             einfo "Will use Ninja instead of Unix Makefile"
             MAKEFILE_GENERATOR=${MAKEFILE_GENERATOR:-Ninja}
@@ -566,7 +551,14 @@ generate_configuration() {
     FEATURE_RENDERER1=${FEATURE_RENDERER1:-1}
     FEATURE_RENDERER2=${FEATURE_RENDERER2:-0}
     FEATURE_RENDERER_GLES=${FEATURE_RENDERER_GLES:-0}
+    FEATURE_RENDERER_VULKAN=${FEATURE_RENDERER_VULKAN:-0}
     RENDERER_DYNAMIC=${RENDERER_DYNAMIC:-1}
+
+    # a static build holds only one renderer (e.g. -RPIT, -nodynamic)
+    if [ "$FEATURE_RENDERER_VULKAN" -eq 1 ] && [ "$FEATURE_RENDERER1" -eq 1 ] && [ "$RENDERER_DYNAMIC" -eq 0 ]; then
+        einfo "Vulkan and OpenGL1 renderers: building them as dynamic libraries"
+        RENDERER_DYNAMIC=1
+    fi
 
     if [ "$FEATURE_SSL" -eq 0 ] && [ "$FEATURE_AUTH" -eq 1 ]; then
         ewarning "SSL is disabled, but authentication is enabled. Disabling authentication."
@@ -653,6 +645,7 @@ generate_configuration() {
         "-DFEATURE_RENDERER1=${FEATURE_RENDERER1}"
         "-DFEATURE_RENDERER2=${FEATURE_RENDERER2}"
         "-DFEATURE_RENDERER_GLES=${FEATURE_RENDERER_GLES}"
+        "-DFEATURE_RENDERER_VULKAN=${FEATURE_RENDERER_VULKAN}"
         "-DRENDERER_DYNAMIC=${RENDERER_DYNAMIC}"
         "-DFEATURE_LUASQL=${FEATURE_LUASQL}"
         "-DFEATURE_OMNIBOT=${FEATURE_OMNIBOT}"
@@ -667,6 +660,15 @@ generate_configuration() {
     if [ -n "$TOOLCHAIN_FILE" ]; then
         cmake_args+=(
             "-DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_FILE}"
+        )
+    fi
+
+    # precompiled Vulkan shaders instead of a GLSL compiler (the CI's vk-shaders job)
+    if [ -n "$VK_SHADER_PREBUILT_DIR" ]; then
+        local abs_shader_dir
+        abs_shader_dir=$(realpath "$VK_SHADER_PREBUILT_DIR")
+        cmake_args+=(
+            "-DVK_SHADER_PREBUILT_DIR=${abs_shader_dir}"
         )
     fi
 

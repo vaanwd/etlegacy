@@ -171,7 +171,53 @@ if(FEATURE_RENDERER2)
 endif()
 
 if(FEATURE_RENDERER_VULKAN)
-	add_library(renderer_vulkan ${REND_LIBTYPE} ${RENDERER_VULKAN_FILES} ${RENDERER_COMMON} ${RENDERER_VULKAN_SHADERS})
+	# Compile the GLSL shaders to SPIR-V (or take precompiled ones,
+	# VK_SHADER_PREBUILT_DIR), then embed them all into one generated C source
+	# (vk_shaders.c, VK_FindShaderCode()) so the renderer stays self-contained
+	# and doesn't need runtime filesystem/pk3 access to load them.
+	set(VK_SHADER_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/include/vk_shaders")
+	file(MAKE_DIRECTORY "${VK_SHADER_GEN_DIR}")
+
+	set(VK_SHADER_SPVS "")
+	include(cmake/ETLVkShaders.cmake)
+
+	foreach(VK_SHADER_SRC_NAME ${VK_SHADER_NAMES})
+		set(VK_SHADER_SRC "${CMAKE_SOURCE_DIR}/src/renderer_vk/glsl/${VK_SHADER_SRC_NAME}")
+
+		if(VK_SHADER_PREBUILT_DIR_ABS)
+			# precompiled SPIR-V (see ETLSetupFeatures.cmake)
+			set(VK_SHADER_SPV "${VK_SHADER_PREBUILT_DIR_ABS}/${VK_SHADER_SRC_NAME}.spv")
+			if(NOT EXISTS "${VK_SHADER_SPV}")
+				message(FATAL_ERROR "VK_SHADER_PREBUILT_DIR has no ${VK_SHADER_SRC_NAME}.spv (${VK_SHADER_SPV}) - compile the shaders with cmake/ETLCompileVkShaders.cmake")
+			endif()
+		else()
+			set(VK_SHADER_SPV "${VK_SHADER_GEN_DIR}/${VK_SHADER_SRC_NAME}.spv")
+			etl_vk_shader_stage(${VK_SHADER_SRC_NAME} VK_SHADER_STAGE)
+			etl_vk_glsl_args("${VK_GLSL_COMPILER}" ${VK_SHADER_STAGE} VK_GLSL_ARGS)
+
+			add_custom_command(
+				OUTPUT ${VK_SHADER_SPV}
+				COMMAND $<TARGET_PROPERTY:glslc_binary,GLSLC_EXECUTABLE> ${VK_GLSL_ARGS} ${VK_SHADER_SRC} -o ${VK_SHADER_SPV}
+				DEPENDS ${VK_SHADER_SRC} glslc_binary
+				COMMENT "Compiling Vulkan shader ${VK_SHADER_SRC_NAME}"
+				VERBATIM
+			)
+		endif()
+
+		list(APPEND VK_SHADER_SPVS ${VK_SHADER_SPV})
+	endforeach()
+
+	set(VK_SHADER_SOURCE "${VK_SHADER_GEN_DIR}/vk_shaders.c")
+	string(REPLACE ";" "|" VK_SHADER_SPV_FILES "${VK_SHADER_SPVS}")
+	add_custom_command(
+		OUTPUT ${VK_SHADER_SOURCE}
+		COMMAND ${CMAKE_COMMAND} -DOUTPUT=${VK_SHADER_SOURCE} -DFILES=${VK_SHADER_SPV_FILES} -P ${CMAKE_SOURCE_DIR}/cmake/ETLEmbedVkShaders.cmake
+		DEPENDS ${VK_SHADER_SPVS} ${CMAKE_SOURCE_DIR}/cmake/ETLEmbedVkShaders.cmake
+		COMMENT "Embedding the Vulkan shaders into vk_shaders.c"
+		VERBATIM
+	)
+
+	add_library(renderer_vulkan ${REND_LIBTYPE} ${RENDERER_VULKAN_FILES} ${RENDERER_COMMON} ${RENDERER_COMMON_VULKAN} ${RENDERER_VULKAN_SHADERS} ${VK_SHADER_SOURCE})
 	target_link_libraries(renderer_vulkan renderer_vulkan_libraries renderer_libraries)
 	target_compile_definitions(renderer_vulkan PRIVATE FEATURE_RENDERER_VULKAN)
 	target_compile_definitions(client_libraries INTERFACE FEATURE_RENDERER_VULKAN)

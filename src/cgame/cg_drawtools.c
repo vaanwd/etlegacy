@@ -170,6 +170,20 @@ void CG_SetChargebarIconColor(void)
 	}
 }
 
+static void CG_SetStaminabarIconColor(void)
+{
+	if ((CG_GetActiveHUD()->staminabar.style & STAMINABAR_EMPTYWARN)
+	    && cg.snap->ps.stats[STAT_SPRINTTIME] <= 0)
+	{
+		trap_R_SetColor(colorOrange);
+	}
+	else
+	{
+		// Circular bars leave their fill color active, so restore the normal icon.
+		trap_R_SetColor(NULL);
+	}
+}
+
 /**
  * @brief CG_FilledBar
  * @param[in] x
@@ -332,6 +346,11 @@ void CG_FilledBar(float x, float y, float w, float h, float *startColor, float *
 				}
 			}
 
+			if (icon == cgs.media.hudSprintIcon)
+			{
+				CG_SetStaminabarIconColor();
+			}
+
 			if (flags & BAR_LEFT)
 			{
 				CG_DrawPic(x2, y2 + h2 + offset, iconW, iconH, icon);
@@ -394,6 +413,11 @@ void CG_FilledBar(float x, float y, float w, float h, float *startColor, float *
 				{
 					CG_SetChargebarIconColor();
 				}
+			}
+
+			if (icon == cgs.media.hudSprintIcon)
+			{
+				CG_SetStaminabarIconColor();
 			}
 
 			if (flags & BAR_LEFT)
@@ -515,6 +539,11 @@ void CG_DrawCircle(float x, float y, float w, float h, float *startColor, float 
 			{
 				CG_SetChargebarIconColor();
 			}
+		}
+
+		if (icon == cgs.media.hudSprintIcon)
+		{
+			CG_SetStaminabarIconColor();
 		}
 
 		CG_DrawPic(iconX - iconW * 0.5, iconY - iconH * 0.5, iconW, iconH, icon);
@@ -1611,11 +1640,11 @@ void CG_ShowHelp_On(int *status)
 
 	if (*status == SHOW_SHUTDOWN && milli < cg.fadeTime)
 	{
-		cg.fadeTime = 2 * milli + STATS_FADE_TIME - cg.fadeTime;
+		cg.fadeTime = 2 * milli + cg_windowTime.integer - cg.fadeTime;
 	}
 	else if (*status != SHOW_ON)
 	{
-		cg.fadeTime = milli + STATS_FADE_TIME;
+		cg.fadeTime = milli + cg_windowTime.integer;
 	}
 
 	*status = SHOW_ON;
@@ -1633,11 +1662,11 @@ void CG_ShowHelp_Off(int *status)
 
 		if (milli < cg.fadeTime)
 		{
-			cg.fadeTime = 2 * milli + STATS_FADE_TIME - cg.fadeTime;
+			cg.fadeTime = 2 * milli + cg_windowTime.integer - cg.fadeTime;
 		}
 		else
 		{
-			cg.fadeTime = milli + STATS_FADE_TIME;
+			cg.fadeTime = milli + cg_windowTime.integer;
 		}
 
 		*status = SHOW_SHUTDOWN;
@@ -1757,7 +1786,7 @@ void CG_DrawHelpWindow(float x, float y, int *status, const char *title, const h
 	// Fade-in effects
 	if (diff > 0.0f)
 	{
-		float scale = (diff / STATS_FADE_TIME);
+		float scale = (diff / cg_windowTime.integer);
 
 		if (*status == SHOW_ON)
 		{

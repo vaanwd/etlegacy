@@ -892,7 +892,11 @@ void GfxInfo_f(void)
 		Ren_Print("N/A\n");
 	}
 
-	if (glConfig.deviceSupportsGamma)
+	if (tr.gammaProgramUsed)
+	{
+		Ren_Print("GAMMA: gamma program w/ %d overbright bits\n", tr.overbrightBits);
+	}
+	else if (glConfig.deviceSupportsGamma)
 	{
 		Ren_Print("GAMMA: hardware w/ %d overbright bits\n", tr.overbrightBits);
 	}
@@ -1078,14 +1082,6 @@ void RE_Shutdown(qboolean destroyWindow)
 		ri.Tag_Free();  // wipe all render alloc'd zone memory
 	}
 
-#ifdef __EMSCRIPTEN__
-	if (!destroyWindow)
-	{
-		Com_Memset(&glState, 0, sizeof(glState));
-		Ren_Print("Emscripten: glState reinitialise (destroyWindow=0)\n");
-		glBindTexture(GL_TEXTURE_2D, 0);
-	}
-#endif
 	tr.registered = qfalse;
 }
 

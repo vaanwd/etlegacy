@@ -2240,6 +2240,130 @@ static void ComputeStageIteratorFunc(void)
 	}
 }
 
+/**
+ * @brief Vulkan: marks shaders whose MDM surfaces can be skinned in the
+ * vertex shader (shader_t::vkSkinnable, RB_MDM_SurfaceAnimGPU). The skinned
+ * vertices exist only on the GPU, so every stage must be computable there:
+ * texture coords as stored or environment mapped (tcGen texture or
+ * environment, no tcMod), rgb lightingDiffuse or constant for the draw,
+ * constant alpha, no deforms, single texture.
+ */
+static void ComputeVkSkinnable(void)
+{
+	int i;
+
+	shader.vkSkinnable = qfalse;
+
+	if (shader.isSky || shader.numDeforms || shader.entityMergable || !stages[0].active || shader.sort == SS_PORTAL)
+	{
+		return;
+	}
+
+	for (i = 0; i < MAX_SHADER_STAGES && stages[i].active; i++)
+	{
+		shaderStage_t *pStage = &stages[i];
+
+		switch (pStage->rgbGen)
+		{
+		case CGEN_LIGHTING_DIFFUSE:
+		case CGEN_IDENTITY:
+		case CGEN_IDENTITY_LIGHTING:
+		case CGEN_CONST:
+		case CGEN_ENTITY:
+			break;
+		default:
+			return;
+		}
+
+		switch (pStage->alphaGen)
+		{
+		case AGEN_SKIP:
+		case AGEN_IDENTITY:
+		case AGEN_CONST:
+		case AGEN_ENTITY:
+			break;
+		default:
+			return;
+		}
+
+		if (pStage->bundle[0].numTexMods || pStage->bundle[1].image[0] ||
+		    (pStage->bundle[0].tcGen != TCGEN_TEXTURE && pStage->bundle[0].tcGen != TCGEN_ENVIRONMENT_MAPPED))
+		{
+			return;
+		}
+	}
+
+	shader.vkSkinnable = qtrue;
+}
+
+/**
+ * @brief Vulkan: decides whether world surfaces using this shader can be
+ * drawn straight from the static world vertex buffer (vk.c). Every stage
+ * must produce colors/texcoords that depend only on the BSP vertex data:
+ * no deforms, texture/lightmap texcoords without tcMods, and rgbGen/
+ * alphaGen modes the static vertex shaders reproduce from the vertex color
+ * (see VK_StaticStageColor()). Batches that need fog volumes, dlights or
+ * debug views fall back to tessellation at draw time.
+ */
+static void ComputeVkStatic(void)
+{
+	int i;
+
+	shader.vkStatic = qfalse;
+
+	// portal surfaces are also tessellated by the front end's SurfIsOffscreen(),
+	// which reads the tess vertices
+	if (shader.isSky || shader.numDeforms || shader.entityMergable || !stages[0].active || shader.sort == SS_PORTAL ||
+	    shader.optimalStageIteratorFunc == RB_StageIteratorVertexLitTexture)
+	{
+		return;
+	}
+
+	for (i = 0; i < MAX_SHADER_STAGES && stages[i].active; i++)
+	{
+		shaderStage_t *pStage = &stages[i];
+
+		switch (pStage->rgbGen)
+		{
+		case CGEN_IDENTITY:
+		case CGEN_IDENTITY_LIGHTING:
+		case CGEN_EXACT_VERTEX:
+		case CGEN_VERTEX:
+		case CGEN_CONST:
+			break;
+		default:
+			return;
+		}
+
+		switch (pStage->alphaGen)
+		{
+		case AGEN_SKIP:
+		case AGEN_IDENTITY:
+		case AGEN_CONST:
+		case AGEN_VERTEX:
+			break;
+		default:
+			return;
+		}
+
+		if (pStage->bundle[0].numTexMods ||
+		    (pStage->bundle[0].tcGen != TCGEN_TEXTURE && pStage->bundle[0].tcGen != TCGEN_LIGHTMAP))
+		{
+			return;
+		}
+
+		// collapsed multitexture: the static lightmapped pipeline reads
+		// the texture coords for unit 0 and the lightmap coords for unit 1
+		if (pStage->bundle[1].image[0] &&
+		    (pStage->bundle[1].numTexMods || pStage->bundle[0].tcGen != TCGEN_TEXTURE || pStage->bundle[1].tcGen != TCGEN_LIGHTMAP))
+		{
+			return;
+		}
+	}
+
+	shader.vkStatic = qtrue;
+}
+
 typedef struct
 {
 	int blendA;
@@ -2292,11 +2416,6 @@ static qboolean CollapseMultitexture(void)
 	int             abits, bbits;
 	int             i;
 	textureBundle_t tmpBundle;
-
-	if (!glActiveTextureARB)
-	{
-		return qfalse;
-	}
 
 	// make sure both stages are active
 	if (!stages[0].active || !stages[1].active)
@@ -2960,6 +3079,9 @@ static shader_t *FinishShader(void)
 	// determine which stage iterator function is appropriate
 	ComputeStageIteratorFunc();
 
+	ComputeVkStatic();
+	ComputeVkSkinnable();
+
 	// default back to no compression for next shader
 	if (r_extCompressedTextures->integer == 2)
 	{
@@ -3014,15 +3136,7 @@ qboolean RE_LoadDynamicShader(const char *shadername, const char *shadertext)
 	// empty the whole list
 	if (!shadername && !shadertext)
 	{
-		dptr = dshader;
-		while (dptr)
-		{
-			lastdptr = dptr->next;
-			ri.Free(dptr->shadertext);
-			ri.Free(dptr);
-			dptr = lastdptr;
-		}
-		dshader = NULL;
+		R_PurgeDynamicShaders();
 		return qtrue;
 	}
 
@@ -3291,6 +3405,19 @@ void R_FindLightmap(int *lightmapIndex)
 		return;
 	}
 
+	if (*lightmapIndex >= MAX_LIGHTMAPS)
+	{
+		*lightmapIndex = LIGHTMAP_BY_VERTEX;
+		return;
+	}
+
+	// don't probe the filesystem again for a lightmap that is already known to be missing
+	if (tr.lightmapFailed[*lightmapIndex])
+	{
+		*lightmapIndex = LIGHTMAP_BY_VERTEX;
+		return;
+	}
+
 	// sync up render thread, because we're going to have to load an image
 	R_IssuePendingRenderCommands();
 
@@ -3299,7 +3426,8 @@ void R_FindLightmap(int *lightmapIndex)
 	image = R_FindImageFile(fileName, qfalse, qfalse, GL_CLAMP_TO_EDGE, qtrue);
 	if (image == NULL)
 	{
-		*lightmapIndex = LIGHTMAP_BY_VERTEX;
+		tr.lightmapFailed[*lightmapIndex] = qtrue;
+		*lightmapIndex                    = LIGHTMAP_BY_VERTEX;
 		return;
 	}
 
@@ -3983,6 +4111,24 @@ void R_PurgeShaders(int count)
 	purgeallshaders = qtrue;
 	R_PurgeLightmapShaders();
 	purgeallshaders = qfalse;
+}
+
+/**
+ * @brief R_PurgeDynamicShaders
+ */
+void R_PurgeDynamicShaders(void)
+{
+	dynamicshader_t *dptr, *lastdptr;
+
+	dptr = dshader;
+	while (dptr)
+	{
+		lastdptr = dptr->next;
+		ri.Free(dptr->shadertext);
+		ri.Free(dptr);
+		dptr = lastdptr;
+	}
+	dshader = NULL;
 }
 
 /**

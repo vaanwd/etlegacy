@@ -4,9 +4,12 @@
 #
 # REQUIRES: python uncrustify git
 import os
+import re
 import struct
 import sys
 import difflib
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import cpu_count
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -14,9 +17,12 @@ from typing import List, Optional
 from etl_lib import (
     CWD,
     ROOT_DIR,
-    argparse_add_commit_param,
-    get_changed_files,
+    argparse_add_file_selection_params,
+    get_commits,
     get_current_git_branch,
+    get_formatter,
+    get_selected_files,
+    is_excluded_path,
     rel_str,
     run_command,
 )
@@ -34,7 +40,14 @@ class State:
 @dataclass
 class Error:
     path: Path
+    # Short, self-contained explanation of the failure. Always printed (also
+    # with --hide-details and in the GitHub annotation), so anything needed to
+    # identify and understand the failure (e.g. the offending commit subject)
+    # MUST go here.
     reason: str
+    # OPTIONAL bulky tool output (diffs, linter stdout) that supplements
+    # `reason`. Suppressed by --hide-details and never part of the GitHub
+    # annotation, so never put information here that `reason` depends on.
     detail: Optional[str] = None
 
     def __str__(self):
@@ -137,13 +150,51 @@ def check_tga(path: Path, errors: List["Error"]):
         errors.append(Error(path, f"Failed to check TGA origin: {e}"))
 
 
+# SOF markers announcing a progressive DCT frame (Huffman: SOF2, differential
+# Huffman: SOF6, arithmetic: SOF10, differential arithmetic: SOF14).
+JPEG_PROGRESSIVE_SOF = {0xC2, 0xC6, 0xCA, 0xCE}
+# All SOF markers (0xC4 = DHT, 0xC8 = JPG, 0xCC = DAC are not frame headers).
+JPEG_SOF = set(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
+
+
+def jpeg_is_progressive(data: bytes) -> bool:
+    """Walks the JPEG marker segments up to the frame header (SOF).
+
+    Merely counting SOS markers is wrong: embedded thumbnails (e.g. in EXIF
+    APP1 segments) contain their own SOS markers and baseline JPEGs may use
+    multiple scans. The SOF marker always precedes the first scan, so we never
+    have to look at the entropy coded data.
+    """
+    pos = 2  # skip SOI
+    while pos + 1 < len(data):
+        if data[pos] != 0xFF:
+            raise ValueError(f"Expected marker at offset {pos}.")
+        marker = data[pos + 1]
+        if marker == 0xFF:  # fill byte
+            pos += 1
+            continue
+        pos += 2
+        # Markers without a length field (TEM, RSTn, SOI).
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            continue
+        if marker in (0xD9, 0xDA):  # EOI/SOS before any SOF
+            raise ValueError("No frame header found.")
+        if pos + 2 > len(data):
+            break
+        if marker in JPEG_SOF:
+            return marker in JPEG_PROGRESSIVE_SOF
+        (length,) = struct.unpack(">H", data[pos : pos + 2])
+        pos += length
+    raise ValueError("No frame header found.")
+
+
 def check_jpeg(path: Path, errors: List[Error]):
     try:
         with open(path, "rb") as f:
             data = f.read()
         if not data.startswith(b"\xff\xd8"):
             errors.append(Error(path, "Not a valid JPEG file."))
-        elif data.count(b"\xff\xda") > 1:
+        elif jpeg_is_progressive(data):
             errors.append(Error(path, "Progressive JPEG not supported."))
     except Exception as e:
         errors.append(Error(path, f"Failed to check JPEG: {e}"))
@@ -208,11 +259,17 @@ def check_wav(path: Path, errors: List[Error]):
 
             if audio_format != 1:
                 errors.append(Error(path, "WAV file must be uncompressed PCM."))
-            if bits_per_sample != 16:
-                errors.append(Error(path, "WAV file must be 16-bit."))
+            # PCM WAV stores 8-bit samples as unsigned and 16-bit samples as little-endian.
+            if bits_per_sample not in (8, 16):
+                errors.append(
+                    Error(
+                        path,
+                        "WAV file must be 8-bit unsigned PCM or 16-bit little-endian PCM.",
+                    )
+                )
             if channels != 1:
                 errors.append(Error(path, "WAV file must be mono."))
-            if sample_rate not in (22050, 44100):
+            if sample_rate not in (11025, 22050, 44100):
                 errors.append(
                     Error(
                         path,
@@ -249,30 +306,55 @@ def check_yml(path: Path, errors: List[Error]):
         errors.append(Error(path, f"Failed to diff: {e}"))
 
 
+def check_toml(path: Path, errors: List[Error]):
+    """Check TOML formatting without modifying the file and retain diagnostics."""
+    result = run_command(
+        ["tombi", "format", "--check", "--diff", str(path)], check=False
+    )
+    if result.returncode != 0:
+        errors.append(
+            Error(
+                path=path,
+                reason="Tombi formatting check failed.",
+                detail="\n".join(
+                    output.strip()
+                    for output in (result.stdout, result.stderr)
+                    if output.strip()
+                ),
+            )
+        )
+
+
 def check_file(path: Path) -> Optional[List[Error]]:
     errors = []
 
-    match path.suffix.lower():
-        case ".c" | ".cpp" | ".glsl" | ".h":
+    # formatter-backed file types (shared with autoformat)
+    match get_formatter(path):
+        case "uncrustify":
             check_uncrustify(path, errors)
+        case "black":
+            check_black(path, errors)
+        case "shfmt":
+            check_sh(path, errors)
+        case "prettier":
+            check_yml(path, errors)
+        case "tombi":
+            check_toml(path, errors)
+
+    # asset checks, nothing to autoformat there
+    match path.suffix.lower():
         case ".tga":
             check_tga(path, errors)
         case ".jpg" | ".jpeg":
             check_jpeg(path, errors)
         case ".wav":
             check_wav(path, errors)
-        case ".py":
-            check_black(path, errors)
-        case ".sh":
-            check_sh(path, errors)
-        case ".yml" | ".yaml":
-            check_yml(path, errors)
     return errors
 
 
 def check_changes(state: State):
     # assemble files
-    changed_files = get_changed_files(state.args.commit_hash)
+    changed_files = get_selected_files(state.args)
 
     if len(changed_files) < 1:
         print("No changes found.")
@@ -280,18 +362,13 @@ def check_changes(state: State):
 
     print("------------------------------------------")
 
-    # check assembled files for errors
+    # collect the files that actually need checking
+    to_check = []
     for path in sorted(list(changed_files)):
         relpath = path.relative_to(ROOT_DIR)
 
         # ignore files below certain directories
-        if any(
-            relpath.parts[0] == x
-            for x in [
-                "libs",
-                "vendor",
-            ]
-        ):
+        if is_excluded_path(path):
             print(f"☇ Skipping ignored: {path.relative_to(ROOT_DIR)}")
             continue
 
@@ -299,7 +376,16 @@ def check_changes(state: State):
             print(f"☇ Skipping removed/missing: {path.relative_to(ROOT_DIR)}")
             continue
 
-        errors = check_file(path)
+        to_check.append((path, relpath))
+
+    # The checks are dominated by spawning external tools (uncrustify, black,
+    # ...) per file, so run them in parallel. Threads are sufficient since the
+    # work happens in subprocesses. map() preserves the (sorted) input order
+    # so the output stays deterministic.
+    with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
+        all_errors = list(executor.map(lambda x: check_file(x[0]), to_check))
+
+    for (_path, relpath), errors in zip(to_check, all_errors):
         if errors == None:
             pass
         elif errors:
@@ -323,6 +409,42 @@ def check_global(state: State):
     check_global_actionlint()
 
 
+def check_commit_messages(state: State):
+    # Check the selected commits even when they contain no files to validate.
+    for commit in get_commits(state.args.commit_hash):
+        subject = run_command(
+            ["git", "show", "-s", "--format=%s", commit]
+        ).stdout.rstrip("\n")
+        path = f"[commit {commit}]"
+
+        # Git-generated revert subjects retain their standard capitalization.
+        if subject.startswith("Revert ") or (
+            re.fullmatch(r"[^:\s]+: [a-z].*", subject)
+            and subject.partition(":")[0].islower()
+        ):
+            state.succeeded_files.append(path)
+        else:
+            state.failed_files.append(
+                [
+                    path,
+                    [
+                        Error(
+                            path,
+                            # The subject is part of the reason (not the detail) so
+                            # it is still shown with --hide-details and in the
+                            # GitHub annotation.
+                            "Invalid commit subject: ↓\n\n"
+                            f"{subject}\n\n"
+                            "Commit subject MUST use 'category: description', with a "
+                            "lowercase category, a space after ':', and a description "
+                            "starting with a lowercase letter. Use 'various: ...' if you "
+                            "don't know which category to use.",
+                        )
+                    ],
+                ]
+            )
+
+
 def main(args):
     global HIDE_DETAIL
     HIDE_DETAIL = args.hide_details
@@ -330,13 +452,15 @@ def main(args):
     state = State(args=args)
 
     current_git_branch = get_current_git_branch()
-    skip_changes = args.commit_hash == current_git_branch
+    # with --all the commit is irrelevant, so never skip
+    skip_changes = not args.all and args.commit_hash == current_git_branch
 
     if not skip_changes:
         check_changes(state)
     else:
         print("Skipping checking changes...")
 
+    check_commit_messages(state)
     check_global(state)
 
     for relpath in state.succeeded_files:
@@ -354,7 +478,9 @@ def main(args):
                     path = error.path
                     if isinstance(path, Path):
                         path = error.path.relative_to(CWD)
-                    print(f"::error ::{path} - {error.reason}")
+                    # Newlines must be escaped to stay inside one annotation.
+                    reason = error.reason.replace("\n", "%0A")
+                    print(f"::error ::{path} - {reason}")
                 total_errors += 1
 
     if total_errors:
@@ -370,10 +496,10 @@ def cli():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Check files in commit(s) for formatting or asset issues."
+        description="Check commit subjects and files in commit(s) (or all git-tracked files with --all) for formatting or asset issues."
     )
 
-    argparse_add_commit_param(parser)
+    argparse_add_file_selection_params(parser)
 
     parser.add_argument(
         "-hd",

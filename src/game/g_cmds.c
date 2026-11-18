@@ -57,7 +57,8 @@ static qboolean G_MatchOnePlayer(int *plist, char *err, size_t len)
 
 	if (plist[0] == -1)
 	{
-		Q_strcat(err, len, "no connected player by that name or slot #");
+		Q_strcat(err, len, "no connected player by that name or slot #\n");
+
 		return qfalse;
 	}
 
@@ -70,19 +71,24 @@ static qboolean G_MatchOnePlayer(int *plist, char *err, size_t len)
 		line[0] = '\0';
 
 		Q_strcat(err, len, "more than one player name matches be more specific or use the slot #:\n");
+
 		for (p = plist; *p != -1; p++)
 		{
 			cl = &level.clients[*p];
+
 			if (cl->pers.connected == CON_CONNECTED)
 			{
 				Com_sprintf(line, MAX_NAME_LENGTH + 10, "%2i - %s^7\n", *p, cl->pers.netname);
+
 				if (strlen(err) + strlen(line) > len)
 				{
 					break;
 				}
+
 				Q_strcat(err, len, line);
 			}
 		}
+
 		return qfalse;
 	}
 
@@ -760,15 +766,30 @@ void Cmd_Give_f(gentity_t *ent, unsigned int dwCommand, int value)
 	{
 		int skill;
 
-		for (skill = SK_BATTLE_SENSE; skill < SK_NUM_SKILLS; skill++)
+		if (amount)
 		{
-			if (!ent->client->sess.medals[skill])
+			skill = (skillType_t)amount; // Change amount to skill, so that we can use amount properly
+
+			if (skill >= SK_BATTLE_SENSE && skill < SK_NUM_SKILLS)
 			{
-				ent->client->sess.medals[skill] = 1;
-				break; // add 1 medal, not all at once..
+				++ent->client->sess.medals[skill];
+				ClientUserinfoChanged(ent - g_entities);
+			}
+			else
+			{
+				trap_SendServerCommand(ent - g_entities, va("print \"give medal <skill_no>: No valid skill '%i' (0-6).\n\"", skill));
 			}
 		}
-		ClientUserinfoChanged(ent - g_entities);
+		else
+		{
+			// give 1 medal of each
+			for (skill = SK_BATTLE_SENSE; skill < SK_NUM_SKILLS; skill++)
+			{
+				++ent->client->sess.medals[skill];
+			}
+
+			ClientUserinfoChanged(ent - g_entities);
+		}
 		return;
 	}
 	if (give_all || Q_stricmpn(name, "health", 6) == 0 || Q_stricmpn(name, "hp", 2) == 0)
@@ -4167,7 +4188,14 @@ qboolean Do_Activate_f(gentity_t *ent, gentity_t *traceEnt)
 		ent->client->pmext.weapHeat[WP_DUMMY_MG42] = traceEnt->mg42weapHeat;
 		ent->client->ps.ammo[WP_DUMMY_MG42]        = traceEnt->mg42weapHeat;
 
-		G_UseTargets(traceEnt, ent);     // added for Mike so mounting an MG42 can be a trigger event (let me know if there's any issues with this)
+		if (!Q_stricmp(ent->classname, "misc_aagun"))
+		{
+			ent->client->ps.eFlags |= EF_AAGUN_ACTIVE;
+		}
+		else
+		{
+			ent->client->ps.eFlags |= EF_MG42_ACTIVE;
+		}
 	}
 	else if (((Q_stricmp(traceEnt->classname, "func_door") == 0) || (Q_stricmp(traceEnt->classname, "func_door_rotating") == 0)))
 	{

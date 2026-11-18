@@ -34,6 +34,7 @@
  */
 
 #include "tr_local.h"
+#include "vulkan/vk.h"
 
 trGlobals_t tr;
 
@@ -67,6 +68,8 @@ qboolean    fogIsOn  = qfalse;
  */
 void R_Fog(glfog_t *curfog)
 {
+	float fogEnd;
+
 	if (!r_wolfFog->integer)
 	{
 		R_FogOff();
@@ -95,26 +98,18 @@ void R_Fog(glfog_t *curfog)
 
 	R_FogOn();
 
-	glFogi(GL_FOG_MODE, curfog->mode);
 
-	glFogfv(GL_FOG_COLOR, curfog->color);
 
-	glFogf(GL_FOG_DENSITY, curfog->density);
 
-	glHint(GL_FOG_HINT, curfog->hint);
 
-	glFogf(GL_FOG_START, curfog->start);
 
-	if (r_zFar->value != 0.f)                 // allow override for helping level designers test fog distances
-	{
-		glFogf(GL_FOG_END, r_zFar->value);
-	}
-	else
-	{
-		glFogf(GL_FOG_END, curfog->end);
-	}
+	// allow override for helping level designers test fog distances
+	fogEnd = (r_zFar->value != 0.f) ? r_zFar->value : curfog->end;
 
-	glClearColor(curfog->color[0], curfog->color[1], curfog->color[2], curfog->color[3]);
+	VK_SetClearColor(curfog->color[0], curfog->color[1], curfog->color[2], curfog->color[3]);
+
+	// Vulkan backend fog state (renderer1's glFog* mode/color/density/start/end)
+	VK_SetFog(curfog->color, curfog->start, fogEnd, curfog->mode == GL_EXP, curfog->density);
 }
 
 /**
@@ -122,11 +117,12 @@ void R_Fog(glfog_t *curfog)
  */
 void R_FogOff(void)
 {
+	VK_SetFogOff();
+
 	if (!fogIsOn)
 	{
 		return;
 	}
-	glDisable(GL_FOG);
 	fogIsOn = qfalse;
 }
 
@@ -157,7 +153,7 @@ void R_FogOn(void)
 		return;
 	}
 
-	glEnable(GL_FOG);
+	VK_SetFogOn();
 	fogIsOn = qtrue;
 }
 
@@ -401,20 +397,6 @@ void R_LocalPointToWorld(vec3_t local, vec3_t world)
 	world[0] = local[0] * tr.orientation.axis[0][0] + local[1] * tr.orientation.axis[1][0] + local[2] * tr.orientation.axis[2][0] + tr.orientation.origin[0];
 	world[1] = local[0] * tr.orientation.axis[0][1] + local[1] * tr.orientation.axis[1][1] + local[2] * tr.orientation.axis[2][1] + tr.orientation.origin[1];
 	world[2] = local[0] * tr.orientation.axis[0][2] + local[1] * tr.orientation.axis[1][2] + local[2] * tr.orientation.axis[2][2] + tr.orientation.origin[2];
-}
-
-/**
- * @brief R_WorldToLocal
- * @param[in] world
- * @param[out] local
- *
- * @note Unused
- */
-void R_WorldToLocal(vec3_t world, vec3_t local)
-{
-	local[0] = DotProduct(world, tr.orientation.axis[0]);
-	local[1] = DotProduct(world, tr.orientation.axis[1]);
-	local[2] = DotProduct(world, tr.orientation.axis[2]);
 }
 
 /**
@@ -1257,7 +1239,7 @@ static qboolean IsMirror(const drawSurf_t *drawSurf, int entityNum)
  * @param clipDest - unused
  * @return
  */
-static qboolean SurfIsOffscreen(const drawSurf_t *drawSurf, vec4_t clipDest[128])
+static qboolean SurfIsOffscreenTess(const drawSurf_t *drawSurf, vec4_t clipDest[128])
 {
 	float        shortest = 100000000;
 	int          entityNum;
@@ -1350,6 +1332,23 @@ static qboolean SurfIsOffscreen(const drawSurf_t *drawSurf, vec4_t clipDest[128]
 	}
 
 	return qfalse;
+}
+
+/**
+ * @brief SurfIsOffscreenTess(), then empties tess again: the test tessellates
+ * the surface outside the backend loop, and the next RB_EndSurface() would
+ * otherwise draw it before the next frame's first command (renderer1 does -
+ * harmless in GL, but in Vulkan before any view has set its viewport).
+ * @param[in] drawSurf
+ * @param clipDest - unused
+ * @return
+ */
+static qboolean SurfIsOffscreen(const drawSurf_t *drawSurf, vec4_t clipDest[128])
+{
+	qboolean offscreen = SurfIsOffscreenTess(drawSurf, clipDest);
+
+	RB_ClearSurface();
+	return offscreen;
 }
 
 /**
@@ -1780,25 +1779,25 @@ void R_DebugPolygon(int color, int numPoints, float *points)
 	GL_State(GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE);
 
 	// draw solid shade
-	glColor3f(color & 1, (color >> 1) & 1, (color >> 2) & 1);
-	glBegin(GL_POLYGON);
+	VKimm_Color3f(color & 1, (color >> 1) & 1, (color >> 2) & 1);
+	VKimm_Begin(GL_POLYGON);
 	for (i = 0 ; i < numPoints ; i++)
 	{
-		glVertex3fv(points + i * 3);
+		VKimm_Vertex3fv(points + i * 3);
 	}
-	glEnd();
+	VKimm_End();
 
 	// draw wireframe outline
 	GL_State(GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE);
-	glDepthRange(0, 0);
-	glColor3f(1, 1, 1);
-	glBegin(GL_POLYGON);
+	VK_SetDepthRange(0, 0);
+	VKimm_Color3f(1, 1, 1);
+	VKimm_Begin(GL_POLYGON);
 	for (i = 0 ; i < numPoints ; i++)
 	{
-		glVertex3fv(points + i * 3);
+		VKimm_Vertex3fv(points + i * 3);
 	}
-	glEnd();
-	glDepthRange(0, 1);
+	VKimm_End();
+	VK_SetDepthRange(0, 1);
 }
 
 /**
@@ -1817,19 +1816,13 @@ void R_DebugText(const vec3_t org, float r, float g, float b, const char *text, 
 	Ren_Print("TODO: R_DebugText Unimplemented!\n");
 	/*
 	if ( neverOcclude ) {
-	    glDepthRange( 0, 0 );  // never occluded
+	    VK_SetDepthRange( 0, 0 );  // never occluded
 
 	}
-	glColor3f( r, g, b );
-	glRasterPos3fv( org );
-	glPushAttrib( GL_LIST_BIT );
-	glListBase( gl_NormalFontBase );
-	glCallLists( strlen( text ), GL_UNSIGNED_BYTE, text );
-	glListBase( 0 );
-	glPopAttrib();
+	VKimm_Color3f( r, g, b );
 
 	if ( neverOcclude ) {
-	    glDepthRange( 0, 1 );
+	    VK_SetDepthRange( 0, 1 );
 	}
 	*/
 }
@@ -1850,7 +1843,6 @@ static void R_DebugGraphics(void)
 	R_IssuePendingRenderCommands();
 
 	GL_Bind(tr.whiteImage);
-	GL_Cull(CT_FRONT_SIDED);
 	ri.CM_DrawDebugSurface(R_DebugPolygon);
 }
 

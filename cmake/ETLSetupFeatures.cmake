@@ -10,7 +10,7 @@ set(SRC "${PROJECT_SOURCE_DIR}/src")
 #-----------------------------------------------------------------
 if(BUILD_CLIENT)
 
-	if(NOT WIN32 AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN) # Dependency of GLEW and SDL_syswm.h
+	if(NOT WIN32 AND NOT APPLE AND NOT ANDROID) # Dependency of GLEW and SDL_syswm.h
 		find_package(X11 REQUIRED)
 		target_include_directories(client_libraries INTERFACE ${X11_INCLUDE_DIR})
 	endif()
@@ -38,18 +38,13 @@ if(BUILD_CLIENT)
 		endif()
 	endif()
 
-	# temp. added vulkan to the list of dependencies
-	if(FEATURE_RENDERER1 OR FEATURE_RENDERER2 OR FEATURE_RENDERER_VULKAN)
+	if(FEATURE_RENDERER1 OR FEATURE_RENDERER2)
 		# ghost target to link all opengl renderer libraries
 		add_library(opengl_renderer_libs INTERFACE)
 		if(NOT BUNDLED_GLEW)
-			if(NOT EMSCRIPTEN)
-				find_package(GLEW REQUIRED)
-				target_link_libraries(opengl_renderer_libs INTERFACE ${GLEW_LIBRARY})
-				target_include_directories(opengl_renderer_libs INTERFACE ${GLEW_INCLUDE_PATH})
-			else()
-				message("Using Emscripten's Glew")
-			endif()
+			find_package(GLEW REQUIRED)
+			target_link_libraries(opengl_renderer_libs INTERFACE ${GLEW_LIBRARY})
+			target_include_directories(opengl_renderer_libs INTERFACE ${GLEW_INCLUDE_PATH})
 		else()
 			target_link_libraries(opengl_renderer_libs INTERFACE bundled_glew)
 			target_compile_definitions(opengl_renderer_libs INTERFACE BUNDLED_GLEW)
@@ -67,20 +62,12 @@ if(BUILD_CLIENT)
 			message(STATUS "Using legacy OpenGL instead of GLVND")
 			set(OpenGL_GL_PREFERENCE LEGACY)
 		endif ()
-		if(NOT EMSCRIPTEN)
-			find_package(OpenGL REQUIRED COMPONENTS OpenGL)
-			target_link_libraries(opengl_renderer_libs INTERFACE OpenGL::GL)
-			target_include_directories(opengl_renderer_libs INTERFACE ${OPENGL_INCLUDE_DIR})
-		else()
-			target_link_libraries(opengl_renderer_libs INTERFACE bundled_gl4es_int)
-			target_include_directories(opengl_renderer_libs INTERFACE bundled_gl4es_int)
-			target_compile_options(opengl_renderer_libs INTERFACE "-fvisibility=hidden")
-			target_link_options(opengl_renderer_libs INTERFACE "-sMAX_WEBGL_VERSION=2" "-sFULL_ES2=1" "-sUSE_WEBGL2=1")
-		endif()
+		find_package(OpenGL REQUIRED COMPONENTS OpenGL)
+		target_link_libraries(opengl_renderer_libs INTERFACE OpenGL::GL)
+		target_include_directories(opengl_renderer_libs INTERFACE ${OPENGL_INCLUDE_DIR})
 
 		target_link_libraries(renderer_gl1_libraries INTERFACE opengl_renderer_libs)
 		target_link_libraries(renderer_gl2_libraries INTERFACE opengl_renderer_libs)
-		target_link_libraries(renderer_vulkan_libraries INTERFACE opengl_renderer_libs)
 	endif()
 
 	if(FEATURE_RENDERER_GLES)
@@ -90,9 +77,46 @@ if(BUILD_CLIENT)
 	endif()
 
 	if(FEATURE_RENDERER_VULKAN)
-		# FIXME: use the vulkan sdk for now, swap to headers only at some point
-		find_package(Vulkan REQUIRED)
-		target_link_libraries(renderer_vulkan_libraries INTERFACE Vulkan::Vulkan)
+		# Vulkan API headers only. The renderer never links a Vulkan library,
+		# all entry points are loaded at runtime from the library SDL opens
+		# (the driver's loader libvulkan.so.1 / vulkan-1.dll; on macOS the
+		# bundled MoltenVK or the SDK loader) - see vk_funcs.h.
+		if(BUNDLED_VULKAN_HEADERS)
+			target_link_libraries(renderer_vulkan_libraries INTERFACE bundled_vulkan_headers_int)
+		else()
+			find_path(VULKAN_INCLUDE_DIR
+				NAMES vulkan/vulkan.h
+				HINTS "$ENV{VULKAN_SDK}/include" "$ENV{VULKAN_SDK}/Include"
+				DOC "Directory containing the Vulkan API headers (vulkan/vulkan.h)"
+			)
+			if(NOT VULKAN_INCLUDE_DIR)
+				message(FATAL_ERROR "Vulkan headers (vulkan/vulkan.h) not found - install the Vulkan-Headers package, set VULKAN_INCLUDE_DIR or enable BUNDLED_VULKAN_HEADERS")
+			endif()
+			target_include_directories(renderer_vulkan_libraries INTERFACE "${VULKAN_INCLUDE_DIR}")
+		endif()
+		target_compile_definitions(renderer_vulkan_libraries INTERFACE VK_NO_PROTOTYPES)
+
+		# Shaders: compiled from GLSL to SPIR-V by the build, or precompiled
+		# <name>.spv files (cmake/ETLCompileVkShaders.cmake - the CI compiles
+		# them once for all build machines, which have no GLSL compiler). A
+		# relative VK_SHADER_PREBUILT_DIR is relative to the source directory.
+		set(VK_SHADER_PREBUILT_DIR "" CACHE PATH "Directory with precompiled Vulkan shaders (<name>.spv) to use instead of a GLSL compiler")
+		if(VK_SHADER_PREBUILT_DIR)
+			get_filename_component(VK_SHADER_PREBUILT_DIR_ABS "${VK_SHADER_PREBUILT_DIR}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+			message(STATUS "Vulkan shaders: precompiled SPIR-V from ${VK_SHADER_PREBUILT_DIR_ABS}")
+		elseif(NOT BUNDLED_SHADERC)
+			# The find glslc call gets made in the main CMakeLists
+			if(NOT VK_GLSL_COMPILER)
+				message(FATAL_ERROR "No GLSL compiler found - install glslc (shaderc) or glslangValidator (glslang), set VK_GLSL_COMPILER, or set VK_SHADER_PREBUILT_DIR to precompiled shaders (cmake/ETLCompileVkShaders.cmake)")
+			endif()
+			message(STATUS "Vulkan GLSL compiler: ${VK_GLSL_COMPILER}")
+			add_custom_target(glslc_binary)
+			set_target_properties(glslc_binary PROPERTIES
+				GLSLC_EXECUTABLE "${VK_GLSL_COMPILER}"
+			)
+		else()
+			message(STATUS "Defaulting to bundled shaderc compilation")
+		endif()
 	endif()
 
 	if(NOT BUNDLED_SDL)
@@ -244,15 +268,13 @@ if(BUILD_CLIENT OR BUILD_SERVER)
 		target_sources(engine_libraries INTERFACE "${SRC}/qcommon/dl_main_curl.c")
 	elseif(ANDROID)
 		target_sources(engine_libraries INTERFACE "${SRC}/qcommon/dl_main_android.c")
-	elseif(EMSCRIPTEN)
-		target_sources(engine_libraries INTERFACE "${SRC}/qcommon/dl_main_wasm.c")
 	else()
 		target_sources(engine_libraries INTERFACE "${SRC}/qcommon/dl_main_stubs.c")
 	endif()
 
 	if(FEATURE_SSL)
 		if(NOT BUNDLED_WOLFSSL AND NOT BUNDLED_OPENSSL)
-			if(NOT APPLE AND NOT WIN32 AND NOT ANDROID AND NOT EMSCRIPTEN)
+			if(NOT APPLE AND NOT WIN32 AND NOT ANDROID)
 				find_package(OpenSSL REQUIRED)
 				target_link_libraries(engine_libraries INTERFACE ${OPENSSL_LIBRARIES})
 				target_include_directories(engine_libraries INTERFACE ${OPENSSL_INCLUDE_DIR})

@@ -327,13 +327,13 @@ void CG_NewClientInfo(int clientNum)
 	if (*v)
 	{
 		int  i;
-		char buf[2];
+		char *token;
+		char *str = (char *)v;
 
-		buf[1] = '\0';
 		for (i = 0; i < SK_NUM_SKILLS; i++)
 		{
-			buf[0]            = *v;
-			newInfo.medals[i] = Q_atoi(buf);
+			token             = COM_Parse(&str);
+			newInfo.medals[i] = Q_atoi(token);
 			v++;
 		}
 	}
@@ -3339,7 +3339,10 @@ void CG_ResetPlayerEntity(centity_t *cent)
 		cent->pe.torso.pitchAngle = cent->rawAngles[PITCH];
 		cent->pe.torso.pitching   = qfalse;
 
-		ci->health = CG_GetPlayerMaxHealth(ci->clientNum, ci->cls, ci->team);
+		if (!cgs.clientinfo[cg.clientNum].shoutcaster)
+		{
+			ci->health = CG_GetPlayerMaxHealth(ci->clientNum, ci->cls, ci->team);
+		}
 	}
 
 	BG_EvaluateTrajectory(&cent->currentState.pos, cg.time, cent->lerpOrigin, qfalse, cent->currentState.effect2Time);

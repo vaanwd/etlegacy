@@ -54,6 +54,7 @@ typedef struct
 	qboolean shiftHealthBarDynamicColorStyle2;          //< added in version 6
 	qboolean moveBarStyleIntoOwnField;                  //< added in version 7
 	qboolean shiftDynamicColorToPrestige;               //< added in version 8
+	qboolean renamePopupMessageComp;                    //< added in version 9
 } hudFileUpgrades_t;
 
 static uint32_t CG_CompareHudComponents(hudStucture_t *hud, hudComponent_t *comp, hudStucture_t *parentHud, hudComponent_t *parentComp);
@@ -396,45 +397,6 @@ static qboolean CG_MoveHudFile(const char *source, const char *target, int expec
 	}
 
 	CG_Printf(S_COLOR_CYAN "Moved HUD file '%s' to '%s'\n", source, target);
-	return qtrue;
-}
-
-/**
- * @brief Accepts only canonical hud_v<version>.dat files
- * @param[in] filename
- * @param[out] version
- * @return
- */
-static qboolean CG_ParseHudVersionFilename(const char *filename, int *version)
-{
-	const char *scan;
-	int        parsedVersion;
-
-	*version = 0;
-	if (Q_strncmp(filename, "hud_v", 5))
-	{
-		return qfalse;
-	}
-
-	scan = filename + 5;
-	if (!Q_isnumeric(*scan))
-	{
-		return qfalse;
-	}
-
-	parsedVersion = 0;
-	while (Q_isnumeric(*scan))
-	{
-		parsedVersion = parsedVersion * 10 + (*scan - '0');
-		scan++;
-	}
-
-	if (Q_stricmp(scan, ".dat"))
-	{
-		return qfalse;
-	}
-
-	*version = parsedVersion;
 	return qtrue;
 }
 
@@ -1860,7 +1822,16 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 	for (i = 0; hudComponentFields[i].name; i++)
 	{
 		hudComponent_t *component = (hudComponent_t *) ((char *) tmpHud + hudComponentFields[i].offset);
-		cJSON          *comp      = cJSON_GetObjectItem(comps, hudComponentFields[i].name);
+		cJSON          *comp;
+
+		if (upgr->renamePopupMessageComp && !Q_strncmp(hudComponentFields[i].name, "popupmessages1", strlen("popupmessages1")))
+		{
+			comp = cJSON_GetObjectItem(comps, "popupmessages");
+		}
+		else
+		{
+			comp = cJSON_GetObjectItem(comps, hudComponentFields[i].name);
+		}
 
 		if (parentHud)
 		{
@@ -2039,7 +2010,7 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 		if (!parentHud || (tmpHud->staminabar.style != parentHud->staminabar.style))
 		{
 			tmpHud->staminabar.barStyle = tmpHud->staminabar.style;
-			tmpHud->staminabar.style    = 0;    // clear all
+			tmpHud->staminabar.style    = STAMINABAR_EMPTYWARN; // Enable the warning when upgrading legacy bar styles.
 		}
 
 		if (!parentHud || (tmpHud->breathbar.style != parentHud->breathbar.style))
@@ -2177,6 +2148,9 @@ static void CG_CheckJsonFileUpgrades(cJSON *root, hudFileUpgrades_t *ret)
 		break;
 	case 7:         // 2.84 - prestige removed, dynamic color shifted to previous prestige value
 		ret->shiftDynamicColorToPrestige = qtrue;
+		break;
+	case 8:         // 2.86.1 - popupmessage component name renamed to popupmessage1
+		ret->renamePopupMessageComp = qtrue;
 		break;
 	default:
 		CG_Printf(S_COLOR_RED "ERROR CG_ReadHudJsonFile: invalid version used: %i only %i is supported\n", fileVersion, CURRENT_HUD_JSON_VERSION);
@@ -2403,15 +2377,8 @@ void CG_ReadHudsFromFile(void)
 	// `hud_v7.dat`
 	{
 		CG_HudVersionedDirPath(hudDir, sizeof(hudDir));
-		//fileCount = trap_FS_GetFileList(hudDir, ".dat", fileList, sizeof(fileList));
-		//fileName  = fileList;
-		//for (fileIndex = 0; fileIndex < fileCount; fileIndex++)
 		for (filenameVersion = CURRENT_HUD_JSON_VERSION; 0 < filenameVersion; --filenameVersion)
 		{
-			//if (CG_ParseHudVersionFilename(fileName, &filenameVersion) && filenameVersion <= CURRENT_HUD_JSON_VERSION)
-			//{
-			//Com_sprintf(sourcePath, sizeof(sourcePath), "%s/%s", hudDir, fileName);
-
 			Com_sprintf(sourcePath, sizeof(sourcePath), "%s/hud_v%i.dat", hudDir, filenameVersion);
 
 			if (CG_HudFileExists(sourcePath))
@@ -2453,7 +2420,6 @@ void CG_ReadHudsFromFile(void)
 					}
 				}
 			}
-			//fileName += strlen(fileName) + 1;
 		}
 	}
 
@@ -2485,15 +2451,8 @@ void CG_ReadHudsFromFile(void)
 	if (!currentHudUsable)
 	{
 		latestCompatibleHudVersion = 0;
-		//fileCount                  = trap_FS_GetFileList(hudDir, ".dat", fileList, sizeof(fileList));
-		//fileName                   = fileList;
-		//for (fileIndex = 0; fileIndex < fileCount; fileIndex++)
 		for (filenameVersion = CURRENT_HUD_JSON_VERSION; 0 < filenameVersion; --filenameVersion)
 		{
-			//if (CG_ParseHudVersionFilename(fileName, &filenameVersion) && filenameVersion <= CURRENT_HUD_JSON_VERSION)
-			//{
-			//Com_sprintf(sourcePath, sizeof(sourcePath), "%s/%s", hudDir, fileName);
-
 			Com_sprintf(sourcePath, sizeof(sourcePath), "%s/hud_v%i.dat", hudDir, filenameVersion);
 
 			if (CG_HudFileExists(sourcePath))
@@ -2519,7 +2478,6 @@ void CG_ReadHudsFromFile(void)
 					}
 				}
 			}
-			//fileName += strlen(fileName) + 1;
 		}
 
 		if (latestCompatibleHudPath[0] && CG_ReadHudJsonFile(latestCompatibleHudPath, qtrue))

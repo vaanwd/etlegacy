@@ -43,10 +43,6 @@ extern const char *cg_skillRewardsDetails[SK_NUM_SKILLS][NUM_SKILL_LEVELS - 1];
 #define SOUND_FILTER    SOUNDEVENT(cgs.media.sndLimboFilter)
 //#define SOUND_CANCEL    SOUNDEVENT(cgs.media.sndLimboCancel)
 
-#ifdef __EMSCRIPTEN__
-static qboolean bg_limboPanelOffsetApplied = qfalse;
-#endif
-
 void CG_DrawBorder(float x, float y, float w, float h, qboolean fill, qboolean drawMouseOver);
 
 const team_t teamOrder[3] =
@@ -55,6 +51,22 @@ const team_t teamOrder[3] =
 	TEAM_ALLIES,
 	TEAM_SPECTATOR,
 };
+
+/**
+ * @brief counterType_t
+ */
+typedef enum counterType_e
+{
+	COUNTER_TYPE_CLASS = 0,
+	COUNTER_TYPE_TEAM,
+	COUNTER_TYPE_XP,
+	COUNTER_TYPE_RESPAWN_TIME,
+	COUNTER_TYPE_SKILL,
+	COUNTER_TYPE_CLOCK,
+	COUNTER_TYPE_STATS,
+	COUNTER_TYPE_MEDAL,
+	COUNTER_TYPE_MAX,
+}counterType_t;
 
 static panel_button_text_t nameEditFont =
 {
@@ -185,6 +197,18 @@ static panel_button_t rightLimboPannel =
 			CG_LimboPanel_RenderMedal,              \
 			NULL,                                   \
 			0,                                   \
+		}; \
+		static panel_button_t medalCounter ## number = {         \
+			NULL,                                   \
+			NULL,                                   \
+			{ MEDAL_PIC_X + MEDAL_PIC_GAP + ((number) * (MEDAL_PIC_GAP + MEDAL_PIC_WIDTH)) + 1,119,                                                                               20, 8 }, \
+			{ COUNTER_TYPE_MEDAL,        number,                                                                            0,  0, 0, 0, 0, 0},        \
+			NULL,                        /* font       */              \
+			NULL,                        /* keyDown    */                  \
+			NULL,                        /* keyUp  */                  \
+			CG_LimboPanel_RenderCounter,              \
+			NULL,                                   \
+			0,                                   \
 		}
 
 MEDAL_PIC(0);
@@ -208,7 +232,7 @@ MEDAL_PIC(6);
 			NULL,                                   \
 			NULL,                                   \
 			{ TEAM_COUNTER_X + TEAM_COUNTER_GAP + ((number) * (TEAM_COUNTER_GAP + TEAM_COUNTER_WIDTH)),236,                                                                                       TEAM_COUNTER_WIDTH, 14 },  \
-			{ 1,                         number,                                                                                    0,                  0, 0, 0, 0, 0},        \
+			{ COUNTER_TYPE_TEAM,         number,                                                                                    0,                  0, 0, 0, 0, 0},        \
 			NULL,                        /* font       */              \
 			NULL,                        /* keyDown    */                  \
 			NULL,                        /* keyUp  */                  \
@@ -220,7 +244,7 @@ MEDAL_PIC(6);
 			NULL,                                   \
 			NULL,                                   \
 			{ TEAM_COUNTER_X + TEAM_COUNTER_GAP + ((number) * (TEAM_COUNTER_GAP + TEAM_COUNTER_WIDTH)) - 20,236,                                                                                            16, 16 }, \
-			{ 1,                       number,                                                                                         0,  0, 0, 0, 0, 0},        \
+			{ COUNTER_TYPE_TEAM,       number,                                                                                         0,  0, 0, 0, 0, 0},        \
 			NULL,                      /* font       */              \
 			NULL,                      /* keyDown    */                  \
 			NULL,                      /* keyUp  */                  \
@@ -260,7 +284,7 @@ TEAM_COUNTER(2);
 			NULL,                                   \
 			NULL,                                   \
 			{ CLASS_COUNTER_X + CLASS_COUNTER_GAP + ((number) * (CLASS_COUNTER_GAP + CLASS_COUNTER_WIDTH)),302,                                                                                           CLASS_COUNTER_WIDTH, 14 }, \
-			{ 0,                         number,                                                                                        0,                   0, 0, 0, 0, 0},        \
+			{ COUNTER_TYPE_CLASS,        number,                                                                                        0,                   0, 0, 0, 0, 0},        \
 			NULL,                        /* font       */              \
 			NULL,                        /* keyDown    */                  \
 			NULL,                        /* keyUp  */                  \
@@ -272,7 +296,7 @@ TEAM_COUNTER(2);
 			NULL,                                   \
 			NULL,                                   \
 			{ CLASS_COUNTER_X + CLASS_COUNTER_GAP + ((number) * (CLASS_COUNTER_GAP + CLASS_COUNTER_WIDTH)) + (CLASS_COUNTER_BUTTON_DIFF / 2.f),266,                                                                                                                               CLASS_COUNTER_WIDTH - CLASS_COUNTER_BUTTON_DIFF, 34 },   \
-			{ 0,                             number,                                                                                                                            0,                                               0, 0, 0, 0, 0},        \
+			{ COUNTER_TYPE_CLASS,            number,                                                                                                                            0,                                               0, 0, 0, 0, 0},        \
 			NULL,                            /* font       */              \
 			CG_LimboPanel_ClassButton_KeyDown,/* keyDown   */  \
 			NULL,                            /* keyUp  */                  \
@@ -414,7 +438,7 @@ static panel_button_t playerXPCounterText =
 	NULL,
 	"XP",
 	{ 566,                        108,   60, 16 },
-	{ 2,                          0,     0,  0, 0, 0, 0, 0},
+	{ COUNTER_TYPE_XP,            0,     0,  0, 0, 0, 0, 0},
 	&spawnLimboFont,              // font
 	NULL,                         // keyDown
 	NULL,                         // keyUp
@@ -428,7 +452,7 @@ static panel_button_t playerXPCounter =
 	NULL,
 	NULL,
 	{ 584,                      96,   40, 16 },
-	{ 2,                        0,    0,  0, 0, 0, 0, 0},
+	{ COUNTER_TYPE_XP,          0,    0,  0, 0, 0, 0, 0},
 	NULL,                       // font
 	NULL,                       // keyDown
 	NULL,                       // keyUp
@@ -437,89 +461,35 @@ static panel_button_t playerXPCounter =
 	0
 };
 
-static panel_button_t playerSkillCounter0 =
-{
-	NULL,
-	NULL,
-	{ 552,                      36,   60, 16 },
-	{ 4,                        0,    0,  0, 0, 0, 4, 0},
-	NULL,                       // font
-	NULL,                       // keyDown
-	NULL,                       // keyUp
-	CG_LimboPanel_RenderCounter,
-	NULL,
-	0
-};
+#define SKILL_COUNTER(number) \
+		static panel_button_t playerSkillCounter ## number = {   \
+			NULL,                             \
+			NULL,                               \
+			{ 552,                       36 + 20 * (number),  60, 16 },                     \
+			{ COUNTER_TYPE_SKILL,        number,              0,  0, 0, 0, 4, 0},         \
+			NULL,                        /* font       */          \
+			NULL,                        /* keyDown    */              \
+			NULL,                        /* keyUp  */              \
+			CG_LimboPanel_RenderCounter,          \
+			NULL,                               \
+			0,                                  \
+		}; \
+		static panel_button_t playerSkillIcon ## number = {   \
+			NULL,                             \
+			NULL,                               \
+			{ 532,                         36 + 20 * (number),  16, 16 },                     \
+			{ number,                      0,                   0,  0, 0, 0, 0, 0},         \
+			NULL,                          /* font       */          \
+			NULL,                          /* keyDown    */              \
+			NULL,                          /* keyUp  */              \
+			CG_LimboPanel_RenderSkillIcon,          \
+			NULL,                               \
+			0,                                  \
+		}
 
-static panel_button_t playerSkillCounter1 =
-{
-	NULL,
-	NULL,
-	{ 552,                      56,   60, 16 },
-	{ 4,                        1,    0,  0, 0, 0, 4, 0},
-	NULL,                       // font
-	NULL,                       // keyDown
-	NULL,                       // keyUp
-	CG_LimboPanel_RenderCounter,
-	NULL,
-	0
-};
-
-static panel_button_t playerSkillCounter2 =
-{
-	NULL,
-	NULL,
-	{ 552,                      76,   60, 16 },
-	{ 4,                        2,    0,  0, 0, 0, 4, 0},
-	NULL,                       // font
-	NULL,                       // keyDown
-	NULL,                       // keyUp
-	CG_LimboPanel_RenderCounter,
-	NULL,
-	0
-};
-
-static panel_button_t playerSkillIcon0 =
-{
-	NULL,
-	NULL,
-	{ 532,                        36,   16, 16 },
-	{ 0,                          0,    0,  0, 0, 0, 0, 0},
-	NULL,                         // font
-	NULL,                         // keyDown
-	NULL,                         // keyUp
-	CG_LimboPanel_RenderSkillIcon,
-	NULL,
-	0
-};
-
-static panel_button_t playerSkillIcon1 =
-{
-	NULL,
-	NULL,
-	{ 532,                        56,   16, 16 },
-	{ 1,                          0,    0,  0, 0, 0, 0, 0},
-	NULL,                         // font
-	NULL,                         // keyDown
-	NULL,                         // keyUp
-	CG_LimboPanel_RenderSkillIcon,
-	NULL,
-	0
-};
-
-static panel_button_t playerSkillIcon2 =
-{
-	NULL,
-	NULL,
-	{ 532,                        76,   16, 16 },
-	{ 2,                          0,    0,  0, 0, 0, 0, 0},
-	NULL,                         // font
-	NULL,                         // keyDown
-	NULL,                         // keyUp
-	CG_LimboPanel_RenderSkillIcon,
-	NULL,
-	0
-};
+SKILL_COUNTER(0);
+SKILL_COUNTER(1);
+SKILL_COUNTER(2);
 
 // =======================
 
@@ -556,7 +526,7 @@ static panel_button_t mapTimeCounter =
 	NULL,
 	NULL,
 	{ 276,                      5,   20, 14 },
-	{ 5,                        0,   0,  0, 0, 0, 0, 0},
+	{ COUNTER_TYPE_CLOCK,       0,   0,  0, 0, 0, 0, 0},
 	NULL,                       // font
 	NULL,                       // keyDown
 	NULL,                       // keyUp
@@ -570,7 +540,7 @@ static panel_button_t mapTimeCounter2 =
 	NULL,
 	NULL,
 	{ 252,                      5,   20, 14 },
-	{ 5,                        1,   0,  0, 0, 0, 0, 0},
+	{ COUNTER_TYPE_CLOCK,       1,   0,  0, 0, 0, 0, 0},
 	NULL,                       // font
 	NULL,                       // keyDown
 	NULL,                       // keyUp
@@ -600,7 +570,7 @@ static panel_button_t respawnCounter =
 	NULL,
 	NULL,
 	{ 400,                      5,   20, 14 },
-	{ 3,                        0,   0,  0, 0, 0, 0, 0},
+	{ COUNTER_TYPE_RESPAWN_TIME,0,   0,  0, 0, 0, 0, 0},
 	NULL,                       // font
 	NULL,                       // keyDown
 	NULL,                       // keyUp
@@ -758,7 +728,7 @@ static panel_button_t weaponStatsShotsCounter =
 	NULL,
 	NULL,
 	{ 460,                      426,   40, 14 },
-	{ 6,                        0,     0,  0, 0, 0, 0, 0},
+	{ COUNTER_TYPE_STATS,       0,     0,  0, 0, 0, 0, 0},
 	NULL,                       // font
 	NULL,                       // keyDown
 	NULL,                       // keyUp
@@ -786,7 +756,7 @@ static panel_button_t weaponStatsHitsCounter =
 	NULL,
 	NULL,
 	{ 516,                      426,   40, 14 },
-	{ 6,                        1,     0,  0, 0, 0, 0, 0},
+	{ COUNTER_TYPE_STATS,       1,     0,  0, 0, 0, 0, 0},
 	NULL,                       // font
 	NULL,                       // keyDown
 	NULL,                       // keyUp
@@ -815,7 +785,7 @@ static panel_button_t weaponStatsAccCounter =
 	NULL,
 	NULL,
 	{ 570,                      426,   30, 14 },
-	{ 6,                        2,     0,  0, 0, 0, 0, 0},
+	{ COUNTER_TYPE_STATS,       2,     0,  0, 0, 0, 0, 0},
 	NULL,                       // font
 	NULL,                       // keyDown
 	NULL,                       // keyUp
@@ -1087,7 +1057,8 @@ static panel_button_t *limboPanelButtons[] =
 	&filterButton5,           &filterButton6,             &filterButton7,         &filterButton8,
 	&filterTitleText,
 
-	&medalPic0,               &medalPic1,                 &medalPic2,             &medalPic3,     &medalPic4,    &medalPic5,&medalPic6,
+	&medalPic0,               &medalPic1,                 &medalPic2,             &medalPic3,     &medalPic4,    &medalPic5,      &medalPic6,
+	&medalCounter0,           &medalCounter1,             &medalCounter2,         &medalCounter3, &medalCounter4,&medalCounter5,  &medalCounter6,
 
 	&teamCounter0,            &teamCounter1,              &teamCounter2,
 	&teamCounterLight0,       &teamCounterLight1,         &teamCounterLight2,
@@ -2745,7 +2716,10 @@ void CG_LimboPanel_RenderCounterNumber(float x, float y, float w, float h, float
 	float numberE = (((numbuttons - 1) - number) + 1) * (1.f / numbuttons);
 
 	CG_AdjustFrom640(&x, &y, &w, &h);
-	trap_R_DrawStretchPic(x, y, w, h, 0, 0, 1, 1, shaderBack);
+	if (shaderBack)
+	{
+		trap_R_DrawStretchPic(x, y, w, h, 0, 0, 1, 1, shaderBack);
+	}
 	trap_R_DrawStretchPic(x, y, w, h, 0, numberS, 1, numberE, shaderRoll);
 }
 
@@ -2764,7 +2738,7 @@ skillType_t CG_LimboPanel_ClassSkillForPosition(int position)
 		return SK_LIGHT_WEAPONS;
 	case 2:
 	default:
-		return BG_ClassSkillForClass(CG_LimboPanel_GetClass());;
+		return BG_ClassSkillForClass(CG_LimboPanel_GetClass());
 	}
 }
 
@@ -2779,7 +2753,7 @@ int CG_LimboPanel_RenderCounter_ValueForButton(panel_button_t *button)
 
 	switch (button->data[0])
 	{
-	case 0:     // class counts
+	case COUNTER_TYPE_CLASS:
 		if (CG_LimboPanel_GetTeam() == TEAM_SPECTATOR || CG_LimboPanel_GetRealTeam() != CG_LimboPanel_GetTeam())
 		{
 			return 0;     // dont give class counts unless we are on that team (or spec)
@@ -2798,7 +2772,7 @@ int CG_LimboPanel_RenderCounter_ValueForButton(panel_button_t *button)
 			count++;
 		}
 		return count;
-	case 1:     // team counts
+	case COUNTER_TYPE_TEAM:
 		for (i = 0; i < MAX_CLIENTS; i++)
 		{
 			if (!cgs.clientinfo[i].infoValid)
@@ -2814,9 +2788,9 @@ int CG_LimboPanel_RenderCounter_ValueForButton(panel_button_t *button)
 			count++;
 		}
 		return count;
-	case 2:     // xp
+	case COUNTER_TYPE_XP:
 		return cg.xp;
-	case 3:     // respawn time
+	case COUNTER_TYPE_RESPAWN_TIME:
 		if (cgs.gamestate != GS_PLAYING)
 		{
 			if (cg.warmup)
@@ -2831,9 +2805,9 @@ int CG_LimboPanel_RenderCounter_ValueForButton(panel_button_t *button)
 			return 0;
 		}
 		return CG_GetReinfTime(qtrue);
-	case 4:     // skills
+	case COUNTER_TYPE_SKILL:
 		return (1 << cgs.clientinfo[cg.clientNum].skill[CG_LimboPanel_ClassSkillForPosition(button->data[1])]) - 1;
-	case 5:     // clock
+	case COUNTER_TYPE_CLOCK:
 		if (cgs.gamestate != GS_PLAYING)
 		{
 			count = cgs.timelimit * 60;
@@ -2863,7 +2837,7 @@ int CG_LimboPanel_RenderCounter_ValueForButton(panel_button_t *button)
 			break;
 		}
 		return 0;
-	case 6:     // stats
+	case COUNTER_TYPE_STATS:
 		switch (button->data[1])
 		{
 		case 0:
@@ -2876,6 +2850,8 @@ int CG_LimboPanel_RenderCounter_ValueForButton(panel_button_t *button)
 			break;
 		}
 		return 0;
+	case COUNTER_TYPE_MEDAL:
+		return cgs.clientinfo[cg.clientNum].medals[button->data[1]];
 	default:
 		break;
 	}
@@ -2893,9 +2869,10 @@ static float CG_LimboPanel_RenderCounter_RollTimeForButton(panel_button_t *butto
 {
 	switch (button->data[0])
 	{
-	case 0:     // class counts
-	case 1:     // team counts
-	case 2:     // xp
+	case COUNTER_TYPE_CLASS:
+	case COUNTER_TYPE_TEAM:
+	case COUNTER_TYPE_XP:
+	case COUNTER_TYPE_MEDAL:
 	{
 		const float diff = abs(button->data[3] - value);
 		if (diff > 0)
@@ -2904,9 +2881,9 @@ static float CG_LimboPanel_RenderCounter_RollTimeForButton(panel_button_t *butto
 		}
 		return 100.f;
 	}
-	case 4:     // skills
+	case COUNTER_TYPE_SKILL:
 		return 1000.f;
-	case 6:     // stats
+	case COUNTER_TYPE_STATS:
 	{
 		const int diff = abs(button->data[3] - value);
 		if (diff < 5)
@@ -2916,8 +2893,8 @@ static float CG_LimboPanel_RenderCounter_RollTimeForButton(panel_button_t *butto
 
 		return 50.f;
 	}
-	case 3:     // respawn time
-	case 5:     // clock
+	case COUNTER_TYPE_RESPAWN_TIME:
+	case COUNTER_TYPE_CLOCK:
 		return 50.f;
 	default:
 		break;
@@ -2935,8 +2912,8 @@ int CG_LimboPanel_RenderCounter_MaxChangeForButton(panel_button_t *button)
 {
 	switch (button->data[0])
 	{
-	case 2:     // xp
-	case 6:     // stats
+	case COUNTER_TYPE_XP:
+	case COUNTER_TYPE_STATS:
 		return 5;
 	default:
 		break;
@@ -2954,18 +2931,12 @@ int CG_LimboPanel_RenderCounter_NumRollers(panel_button_t *button)
 {
 	switch (button->data[0])
 	{
-	case 0:     // class counts
-	case 1:     // team counts
-	case 5:     // clock
-	case 3:     // respawn time
+	case COUNTER_TYPE_CLASS:
+	case COUNTER_TYPE_TEAM:
+	case COUNTER_TYPE_CLOCK:
+	case COUNTER_TYPE_RESPAWN_TIME:
 		return 2;
-	case 4:     // skills
-		if (cg_gameType.integer == GT_WOLF_LMS /*|| CG_LimboPanel_GetTeam() == TEAM_SPECTATOR*/)
-		{
-			return 0;
-		}
-		return 4;
-	case 6:     // stats
+	case COUNTER_TYPE_STATS:
 		switch (button->data[1])
 		{
 		case 0:
@@ -2977,7 +2948,9 @@ int CG_LimboPanel_RenderCounter_NumRollers(panel_button_t *button)
 			break;
 		}
 		break;
-	case 2:     // xp
+	case COUNTER_TYPE_SKILL:
+	case COUNTER_TYPE_XP:
+	case COUNTER_TYPE_MEDAL:
 		if (cg_gameType.integer == GT_WOLF_LMS)
 		{
 			return 0;
@@ -2999,8 +2972,9 @@ qboolean CG_LimboPanel_RenderCounter_CountsDown(panel_button_t *button)
 {
 	switch (button->data[0])
 	{
-	case 4:     // skill
-	case 2:     // xp
+	case COUNTER_TYPE_SKILL:
+	case COUNTER_TYPE_XP:
+	case COUNTER_TYPE_MEDAL:
 		return qfalse;
 	default:
 		break;
@@ -3018,9 +2992,9 @@ qboolean CG_LimboPanel_RenderCounter_CountsUp(panel_button_t *button)
 {
 	switch (button->data[0])
 	{
-	case 4:     // skill
-	case 3:     // respawn time
-	case 5:     // clock
+	case COUNTER_TYPE_SKILL:
+	case COUNTER_TYPE_RESPAWN_TIME:
+	case COUNTER_TYPE_CLOCK:
 		return qfalse;
 	default:
 		break;
@@ -3038,8 +3012,8 @@ qboolean CG_LimboPanel_RenderCounter_StartSet(panel_button_t *button)
 {
 	switch (button->data[0])
 	{
-	case 3:     // respawn time
-	case 5:     // clock
+	case COUNTER_TYPE_RESPAWN_TIME:
+	case COUNTER_TYPE_CLOCK:
 		return qtrue;
 	default:
 		break;
@@ -3054,12 +3028,13 @@ qboolean CG_LimboPanel_RenderCounter_StartSet(panel_button_t *button)
  */
 void CG_LimboPanel_RenderMedal(panel_button_t *button)
 {
-	if (cg_gameType.integer == GT_WOLF || cg_gameType.integer == GT_WOLF_MAPVOTE)
+	if (cg_gameType.integer == GT_WOLF)
 	{
 		return;
 	}
 
 	CG_DrawPic(button->rect.x, button->rect.y, button->rect.w, button->rect.h, cgs.media.medal_back);
+
 	if (cgs.clientinfo[cg.clientNum].medals[button->data[0]])
 	{
 		CG_DrawPic(button->rect.x - 2, button->rect.y, button->rect.w + 4, button->rect.h, cgs.media.medals[button->data[0]]);
@@ -3075,7 +3050,7 @@ qboolean CG_LimboPanel_RenderCounter_IsReversed(panel_button_t *button)
 {
 	switch (button->data[0])
 	{
-	case 4:     // skill
+	case COUNTER_TYPE_SKILL:
 		return qtrue;
 	default:
 		break;
@@ -3095,11 +3070,16 @@ void CG_LimboPanel_RenderCounter_GetShaders(panel_button_t *button, qhandle_t *s
 {
 	switch (button->data[0])
 	{
-	case 4:     // skills
+	case COUNTER_TYPE_SKILL:
 		*shaderBack = cgs.media.limboStar_back;
 		*shaderRoll = cgs.media.limboStar_roll;
 		*numimages  = 2;
 		return;
+	case COUNTER_TYPE_MEDAL:
+		*shaderBack = 0;    // no back
+		*shaderRoll = cgs.media.limboNumber_roll;
+		*numimages  = 10;
+		break;
 	default:
 		*shaderBack = cgs.media.limboNumber_back;
 		*shaderRoll = cgs.media.limboNumber_roll;
@@ -3292,7 +3272,7 @@ void CG_LimboPanel_RenderCounter(panel_button_t *button)
 
 		skill = CG_LimboPanel_ClassSkillForPosition(button->data[1]);
 
-		// First skill counter iteration, reset tool
+		// First skill counter iteration, reset tooltip
 		if (button->data[1] == 0)
 		{
 			memset(&toolTipRect, 0, sizeof(toolTipRect));
@@ -3332,6 +3312,12 @@ void CG_LimboPanel_RenderCounter(panel_button_t *button)
 	{
 		for (i = num - 1; i >= 0; i--)
 		{
+			if (button->data[0] == COUNTER_TYPE_MEDAL)
+			{
+				vec4_t clrBck = { 0.0f, 0.0f, 0.0f, 0.75f };
+				CG_FillRect(x, button->rect.y, w, button->rect.h, clrBck);
+			}
+
 			CG_LimboPanel_RenderCounterNumber(x, button->rect.y, w, button->rect.h, count[i], shaderBack, shaderRoll, numimages);
 
 			x += w + button->data[6];
@@ -3340,13 +3326,13 @@ void CG_LimboPanel_RenderCounter(panel_button_t *button)
 
 	trap_R_SetColor(NULL);
 
-	// class count / team count
-	if (button->data[0] == 0 || button->data[0] == 1)
+	switch (button->data[0])
 	{
+	case COUNTER_TYPE_CLASS:
+	case COUNTER_TYPE_TEAM:
 		CG_DrawPic(button->rect.x - 2, button->rect.y - 2, button->rect.w * 1.4f, button->rect.h + 7, cgs.media.limboCounterBorder);
-	}
-	else if (button->data[0] == 4)  // skill count
-	{
+		break;
+	case COUNTER_TYPE_SKILL:
 		if (toolTipSkill != SK_NUM_SKILLS)
 		{
 			qboolean isSkillAvailable = GetSkillTableData(toolTipSkill)->skillLevels[toolTipSkillNum] >= 0;
@@ -3358,6 +3344,9 @@ void CG_LimboPanel_RenderCounter(panel_button_t *button)
 			                              CG_TranslateString(cg_skillRewards[toolTipSkill][toolTipSkillLevel]),
 			                              CG_TranslateString(cg_skillRewardsDetails[toolTipSkill][toolTipSkillLevel])));
 		}
+		break;
+	default:
+		break;
 	}
 }
 
@@ -3466,15 +3455,7 @@ void CG_LimboPanel_Setup(void)
 void CG_LimboPanel_Init(void)
 {
 	BG_PanelButtonsSetup(limboPanelButtons);
-#ifdef __EMSCRIPTEN__
-	if (!bg_limboPanelOffsetApplied)
-	{
-		C_PanelButtonsSetup(limboPanelButtons, cgs.wideXoffset);    // convert to possible widescreen coordinates..
-		bg_limboPanelOffsetApplied = qtrue;
-	}
-#else
 	C_PanelButtonsSetup(limboPanelButtons, cgs.wideXoffset);    // convert to possible widescreen coordinates..
-#endif
 }
 
 /**

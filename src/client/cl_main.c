@@ -82,7 +82,8 @@ static void CL_ServerStatusResponse(const netadr_t *from, msg_t *msg);
 
 void CL_WavStopRecord_f(void);
 
-qboolean videoPipe;
+qboolean      videoPipe;
+static double aviFrameRemainder;
 
 /**
  * @brief CL_PurgeCache
@@ -1051,11 +1052,6 @@ extern void Sys_In_Restart_f(void);
  */
 void CL_Vid_Restart_f(void)
 {
-#ifdef __EMSCRIPTEN__
-	FS_ConditionalRestart(clc.checksumFeed);
-	Com_Printf(S_COLOR_YELLOW "vid_restart is not supported in the browser - reload the page to apply video changes.\n");
-	return;
-#endif
 	// don't show percent bar, since the memory usage will just sit at the same level anyway
 	// - so keep the value - feels like a bug for users
 	//com_expectedhunkusage = -1;
@@ -1187,16 +1183,9 @@ void CL_Snd_Shutdown(void)
 void CL_Snd_Restart_f(void)
 {
 	CL_Snd_Shutdown();
-#ifdef __EMSCRIPTEN__
-	cls.soundStarted    = qtrue;
-	cls.soundRegistered = qtrue;
-	S_Init();
-	S_BeginRegistration();
-#else
 	// sound will be init in CL_StartHunkUsers of CL_Vid_Restart_f again
 
 	CL_Vid_Restart_f();
-#endif
 }
 
 /**
@@ -2477,17 +2466,57 @@ void CL_CaptureFrameVideo(void)
 	}
 }
 
+/**
+ * @brief Length of the next video frame in whole milliseconds
+ *
+ * Client time only has millisecond steps, so the fraction is carried to the next
+ * frame. Without that, 60 fps would run the game at 16 ms per frame, 4% slower
+ * than the video and its sound.
+ *
+ * @param[in] fps
+ * @return frame length in milliseconds
+ */
+static int CL_VideoFrameStep(float fps)
+{
+	int step;
+
+	aviFrameRemainder += MAX(1000.0 / (double)fps, 1.0);
+	step               = (int)floor(aviFrameRemainder + 1e-9);
+	aviFrameRemainder -= step;
+
+	return step;
+}
+
+/**
+ * @brief CL_FrameHandleVideo
+ * @param[in,out] msec
+ */
 static void CL_FrameHandleVideo(int *msec)
 {
-	qboolean videoActive = CL_VideoRecording();
-	qboolean inGame      = cls.state == CA_ACTIVE;
+	const int clipFps = CL_DemoClipBeginFrame();
+	qboolean  videoActive;
+	qboolean  inGame = cls.state == CA_ACTIVE;
+
+	// a demo clip plays up to its first frame in the fixed steps of the video
+	if (clipFps)
+	{
+		*msec = CL_VideoFrameStep((float)clipFps);
+		CL_DemoClipStartIfDue(*msec);
+
+		if (CL_VideoRecording())
+		{
+			CL_CaptureFrameVideo();
+		}
+		return;
+	}
+
+	videoActive = CL_VideoRecording();
 
 	// if recording an avi, lock to a fixed fps
 	if ((cl_avidemo->integer && *msec && ((inGame && clc.demo.playing) || cl_forceavidemo->integer))
 	    || (videoActive && (inGame && clc.demo.playing)))
 	{
 		float     fps;
-		float     frameDuration;
 		const int videoFps = videoActive ? cl_aviFrameRate->integer : cl_avidemo->integer;
 
 		if (com_timescale->value > 0.0f)
@@ -2498,14 +2527,16 @@ static void CL_FrameHandleVideo(int *msec)
 		{
 			fps = MIN(videoFps, 1000.0f);
 		}
-		frameDuration = MAX(1000.0f / fps, 1.0f); // + clc.aviVideoFrameRemainder;
 
 		CL_CaptureFrameVideo();
 
-		*msec = (int)frameDuration;
-		//clc.aviVideoFrameRemainder = frameDuration + msec;
+		*msec = CL_VideoFrameStep(fps);
+		return;
 	}
-	else if ((cl_avidemo->integer && (!inGame || !cl_forceavidemo->integer)) || (videoActive && !inGame))
+
+	aviFrameRemainder = 0.0;
+
+	if ((cl_avidemo->integer && (!inGame || !cl_forceavidemo->integer)) || (videoActive && !inGame))
 	{
 		CL_StopVideo_f();
 	}
@@ -3007,8 +3038,12 @@ void CL_InitRef(void)
 #endif
 
 #ifdef USE_RENDERER_DLOPEN
-	cl_renderer = Cvar_Get("cl_renderer", DEFAULT_RENDERER_NAME, CVAR_ARCHIVE_ND | CVAR_LATCH);
-
+	cl_renderer = Cvar_GetAndDescribe("cl_renderer", DEFAULT_RENDERER_NAME, CVAR_ARCHIVE_ND | CVAR_LATCH,
+#ifdef FEATURE_RENDERER_VULKAN
+	                                  "Renderer library to load, valid values are 'opengl1' and 'vulkan'");
+#else
+	                                  "Renderer library to load, valid value is 'opengl1'");
+#endif
 
 #if defined(_WIN32)
 	Com_sprintf(dllName, sizeof(dllName), "renderer_%s_" ARCH_STRING DLL_EXT, cl_renderer->string);
@@ -3027,7 +3062,7 @@ void CL_InitRef(void)
 #else // *nix
 		Com_sprintf(dllName, sizeof(dllName), "librenderer_" DEFAULT_RENDERER_NAME "_" ARCH_STRING DLL_EXT);
 #endif
-		rendererLib = Sys_LoadLibrary(dllName);
+		rendererLib = Sys_LoadDll(dllName, qfalse);
 	}
 
 	if (!rendererLib)
@@ -3119,6 +3154,16 @@ void CL_InitRef(void)
 	ri.GLimp_SwapFrame   = GLimp_EndFrame;
 	ri.GLimp_SetGamma    = GLimp_SetGamma;
 	ri.GLimp_SplashImage = GLimp_SplashImage;
+
+#ifdef FEATURE_RENDERER_VULKAN
+	ri.VKimp_GetInstanceExtensions = VKimp_GetInstanceExtensions;
+	ri.VKimp_CreateSurface         = VKimp_CreateSurface;
+	ri.VKimp_GetInstanceProcAddr   = VKimp_GetInstanceProcAddr;
+#else
+	ri.VKimp_GetInstanceExtensions = NULL;
+	ri.VKimp_CreateSurface         = NULL;
+	ri.VKimp_GetInstanceProcAddr   = NULL;
+#endif
 
 	//ri.ftol = Q_ftol;
 
@@ -3277,6 +3322,12 @@ void CL_Shutdown(void)
 		return;
 	}
 	recursive = qtrue;
+
+	// the game was closed during a clip
+	if (CL_DemoClipActive())
+	{
+		Com_SetExitCode(1);
+	}
 
 	if (clc.waverecording)     // write wav header when we quit
 	{

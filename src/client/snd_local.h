@@ -96,6 +96,7 @@ typedef struct sfx_s
 	int soundLength;
 	int soundChannels;
 	char soundName[MAX_QPATH];
+	int pakChecksum;                ///< pk3 file the sound was loaded from, see FS_FilePakChecksum
 	int lastTimeUsed;
 	struct sfx_s *next;
 } sfx_t;
@@ -190,7 +191,7 @@ typedef struct
 typedef struct
 {
 	void (*Shutdown)(void);
-	void (*Reload)(void);
+	void (*Reload)(void);           ///< drops sounds whose file is now read from another pk3 file
 	void (*StartSound)(vec3_t origin, int entnum, int entchannel, sfxHandle_t sfx, int volume);
 	void (*StartSoundEx)(vec3_t origin, int entnum, int entchannel, sfxHandle_t sfx, int flags, int volume);
 	void (*StartLocalSound)(sfxHandle_t sfx, int channelNum, int volume);
@@ -359,5 +360,7 @@ typedef int srcHandle_t;
 qboolean S_AL_Init(soundInterface_t *si);
 
 #endif // FEATURE_OPENAL
+
+qboolean CL_VideoSilencesSpeakers(void);
 
 #endif // #ifndef INCLUDE_SND_LOCAL_H

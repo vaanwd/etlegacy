@@ -100,6 +100,7 @@ extern vmCvar_t cg_dynamicIconsDistance;
 extern vmCvar_t cg_dynamicIconsSize;
 extern vmCvar_t cg_dynamicIconsMaxScale;
 extern vmCvar_t cg_dynamicIconsMinScale;
+extern vmCvar_t cg_compassIconsEdgeScale;
 
 extern vmCvar_t cg_zoomDefaultSniper;
 
@@ -323,6 +324,7 @@ extern vmCvar_t cg_scopeReticleLineThickness;
 extern vmCvar_t cg_scopeReticleDotThickness;
 
 extern vmCvar_t cg_commandMapTime;
+extern vmCvar_t cg_windowTime;
 
 void CG_RegisterCvars(void);
 

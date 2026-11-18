@@ -20,22 +20,6 @@ function(etl_enforce_linux_mod_no_undefined target_name)
 	endif()
 endfunction()
 
-function(etl_configure_wasm_side_module target_name base_name)
-	if(EMSCRIPTEN)
-		target_compile_options(${target_name} PRIVATE "-fvisibility=hidden")
-		target_link_options(${target_name} PRIVATE "-sSIDE_MODULE=1")
-		set_target_properties(${target_name} PROPERTIES
-			PREFIX ""
-			SUFFIX ".so"
-			OUTPUT_NAME "${base_name}.mp.${ARCH}"
-			LIBRARY_OUTPUT_DIRECTORY "${MODNAME}"
-			LIBRARY_OUTPUT_DIRECTORY_DEBUG "${MODNAME}"
-			LIBRARY_OUTPUT_DIRECTORY_RELEASE "${MODNAME}"
-			LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${MODNAME}"
-		)
-	endif()
-endfunction()
-
 #
 # cgame
 #
@@ -55,7 +39,6 @@ if(BUILD_CLIENT_MOD)
 		LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${MODNAME}"
 	)
 	target_compile_definitions(cgame PRIVATE CGAMEDLL=1 MODLIB=1)
-	etl_configure_wasm_side_module(cgame cgame)
 endif()
 
 #
@@ -77,7 +60,6 @@ if(BUILD_CLIENT_MOD)
 		LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${MODNAME}"
 	)
 	target_compile_definitions(ui PRIVATE UIDLL=1 MODLIB=1)
-	etl_configure_wasm_side_module(ui ui)
 endif()
 
 #
@@ -130,7 +112,6 @@ if(BUILD_SERVER_MOD)
 		RUNTIME_OUTPUT_DIRECTORY_RELEASE "${MODNAME}"
 	)
 	target_compile_definitions(qagame PRIVATE GAMEDLL=1 MODLIB=1)
-	etl_configure_wasm_side_module(qagame qagame)
 endif()
 
 #
@@ -176,7 +157,6 @@ if(BUILD_SERVER_MOD)
 		RUNTIME_OUTPUT_DIRECTORY_RELEASE "${MODNAME}"
 	)
 	target_compile_definitions(tvgame PRIVATE GAMEDLL=1 MODLIB=1)
-	etl_configure_wasm_side_module(tvgame tvgame)
 endif()
 
 # Build both architectures on older xcode versions
@@ -302,8 +282,10 @@ if(BUILD_MOD_PK3)
 		OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${MODNAME}/${MODNAME}_${ETL_CMAKE_VERSION_SHORT}.pk3
 		COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/etmain ${CMAKE_CURRENT_BINARY_DIR}/${MODNAME}
 		# Version header is generated in the build tree and staged into ui/ for menu includes.
+		# It is packed via the ui/ directory entry in ETMAIN_FILES_SHALLOW_REL below, so it
+		# must not be listed explicitly again (that would create a duplicate zip entry).
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_BINARY_DIR}/etmain/ui/version_generated.h ${CMAKE_CURRENT_BINARY_DIR}/${MODNAME}/ui/version_generated.h
-		COMMAND ${CMAKE_COMMAND} -E tar c ${CMAKE_CURRENT_BINARY_DIR}/${MODNAME}/${MODNAME}_${ETL_CMAKE_VERSION_SHORT}.pk3 --format=zip $<TARGET_FILE_NAME:cgame> $<TARGET_FILE_NAME:ui> ${ETMAIN_FILES_SHALLOW_REL} ui/version_generated.h
+		COMMAND ${CMAKE_COMMAND} -E tar c ${CMAKE_CURRENT_BINARY_DIR}/${MODNAME}/${MODNAME}_${ETL_CMAKE_VERSION_SHORT}.pk3 --format=zip $<TARGET_FILE_NAME:cgame> $<TARGET_FILE_NAME:ui> ${ETMAIN_FILES_SHALLOW_REL}
 		DEPENDS cgame ui ${ETMAIN_FILES} ${CMAKE_CURRENT_BINARY_DIR}/etmain/ui/version_generated.h remove_old_pk3_files "${ETMAIN_STAGE_STAMP}"
 		WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${MODNAME}/
 		VERBATIM

@@ -85,6 +85,11 @@ void CG_FitTextToWidth_Ext(char *instr, float scale, float w, int size, fontHelp
 	char buffer[1024];
 	char *s, *p, *c, *ls = NULL;
 
+	if (!instr || *instr == '\0')
+	{
+		return;
+	}
+
 	Q_strncpyz(buffer, instr, 1024);
 	Com_Memset(instr, 0, size);
 
@@ -467,11 +472,6 @@ void CG_DrawCursorHintBar(hudComponent_t *comp)
 	float  curValue;
 	float  hintAlpha;
 
-	if (cgs.clientinfo[cg.clientNum].shoutcaster)
-	{
-		return;
-	}
-
 	if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR)
 	{
 		return;
@@ -667,6 +667,10 @@ void CG_MouseEvent(int x, int y)
 		if (x != 0 || y != 0)
 		{
 			cgs.cursorTimeout = cg.time + 5000;
+			if (cgs.eventHandling == CGAME_EVENT_DEMO)
+			{
+				CG_DemoBarMouseMoved();
+			}
 		} // fall through
 	case CGAME_EVENT_SPEAKEREDITOR:
 	case CGAME_EVENT_CAMERAEDITOR:
